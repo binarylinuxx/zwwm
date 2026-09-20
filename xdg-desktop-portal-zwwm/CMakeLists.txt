@@ -57,3 +57,5 @@ install(TARGETS xdg-desktop-portal-zwwm RUNTIME DESTINATION "${CMAKE_INSTALL_BIN
 install(FILES data/zwwm.portal DESTINATION "${CMAKE_INSTALL_DATADIR}/xdg-desktop-portal/portals")
 install(FILES data/zwwm-gtk.portal DESTINATION "${CMAKE_INSTALL_DATADIR}/xdg-desktop-portal/portals")
 install(FILES data/zwwm-portals.conf DESTINATION "${CMAKE_INSTALL_DATADIR}/xdg-desktop-portal")
+install(FILES data/org.freedesktop.impl.portal.desktop.zwwm.service
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/dbus-1/services")

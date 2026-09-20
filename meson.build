@@ -378,6 +378,10 @@ install_data(
   'xdg-desktop-portal-zwwm/data/zwwm-portals.conf',
   install_dir: join_paths(get_option('datadir'), 'xdg-desktop-portal'),
 )
+install_data(
+  'xdg-desktop-portal-zwwm/data/org.freedesktop.impl.portal.desktop.zwwm.service',
+  install_dir: join_paths(get_option('datadir'), 'dbus-1/services'),
+)
 install_data('zwwm/data/config.zw', install_dir: '/etc/xdg/zwwm')
 install_data('zwwm/data/config.zw', install_dir: get_option('datadir') / 'zwwm')
 install_data(

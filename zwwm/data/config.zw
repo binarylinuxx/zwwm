@@ -72,8 +72,8 @@ shaders = {
     values = {
       width = 3
       radius = 10
-      color = "#2e3744"
-      focused_color = "#3da6f2"
+      gradient_colors = ["#2e3744", "#1f2731", "#2e3744"]
+      focused_gradient_colors = ["#75c5ff", "#3da6f2", "#2474ae"]
     }
   }
   background = {

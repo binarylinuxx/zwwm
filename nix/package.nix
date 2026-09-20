@@ -41,7 +41,6 @@ stdenv.mkDerivation {
       ../CHANGELOG.md
       ../CONTRIBUTING.md
       ../LICENSE
-      ../SECURITY.md
       ../THIRD_PARTY.md
       ../zwwm-session
       ../build-aux
@@ -91,6 +90,10 @@ stdenv.mkDerivation {
       --prefix PATH : "$out/bin:${lib.makeBinPath ([ xdg-desktop-portal xdg-desktop-portal-gtk ] ++ lib.optional xwaylandSupport xwayland)}" \
       --prefix XDG_DATA_DIRS : "$out/share" \
       --set NIX_XDG_DESKTOP_PORTAL_DIR "$out/share/xdg-desktop-portal/portals"
+    substituteInPlace "$out/share/wayland-sessions/zwwm.desktop" \
+      --replace-fail "Exec=zwwm-session" "Exec=$out/bin/zwwm-session"
+    substituteInPlace "$out/share/dbus-1/services/org.freedesktop.impl.portal.desktop.zwwm.service" \
+      --replace-fail "Exec=xdg-desktop-portal-zwwm" "Exec=$out/bin/xdg-desktop-portal-zwwm"
   '';
 
   passthru = {
