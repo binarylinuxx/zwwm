@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="zwwm_data_control_v1">
+  <copyright>Copyright 2026 zwwm contributors. SPDX-License-Identifier: MIT</copyright>
+  <interface name="zwwm_data_control_manager_v1" version="1">
+    <description summary="privileged zwwm clipboard control">Provides clipboard access without pointer or keyboard focus.</description>
+    <request name="create_source"><arg name="id" type="new_id" interface="zwwm_data_control_source_v1"/></request>
+    <request name="get_device"><arg name="id" type="new_id" interface="zwwm_data_control_device_v1"/><arg name="seat" type="object" interface="wl_seat"/></request>
+    <request name="destroy" type="destructor"/>
+  </interface>
+  <interface name="zwwm_data_control_device_v1" version="1">
+    <request name="set_selection"><arg name="source" type="object" interface="zwwm_data_control_source_v1" allow-null="true"/></request>
+    <request name="set_primary_selection"><arg name="source" type="object" interface="zwwm_data_control_source_v1" allow-null="true"/></request>
+    <request name="destroy" type="destructor"/>
+    <event name="data_offer"><arg name="id" type="new_id" interface="zwwm_data_control_offer_v1"/></event>
+    <event name="selection"><arg name="offer" type="object" interface="zwwm_data_control_offer_v1" allow-null="true"/></event>
+    <event name="primary_selection"><arg name="offer" type="object" interface="zwwm_data_control_offer_v1" allow-null="true"/></event>
+    <event name="finished"/>
+  </interface>
+  <interface name="zwwm_data_control_source_v1" version="1">
+    <request name="offer"><arg name="mime_type" type="string"/></request>
+    <request name="destroy" type="destructor"/>
+    <event name="send"><arg name="mime_type" type="string"/><arg name="fd" type="fd"/></event>
+    <event name="cancelled"/>
+  </interface>
+  <interface name="zwwm_data_control_offer_v1" version="1">
+    <request name="receive"><arg name="mime_type" type="string"/><arg name="fd" type="fd"/></request>
+    <request name="destroy" type="destructor"/>
+    <event name="offer"><arg name="mime_type" type="string"/></event>
+  </interface>
+</protocol>

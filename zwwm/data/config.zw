@@ -1,0 +1,174 @@
+-- zwwm system configuration
+--
+-- Copy this file to ~/.config/zwwm/config.zw to create a user override.
+-- Changes to the active configuration are reloaded automatically.
+--
+-- Split configuration with one or more imports. Relative paths start beside
+-- the file containing the import; $VAR and ${VAR} use process environment
+-- variables. Later assignments override earlier settings.
+-- import = "$HOME/.config/zwwm/appearance.zw"
+-- import = ["bindings.zw", "${XDG_CONFIG_HOME}/zwwm/outputs.zw"]
+
+-- Commands used by bindings. Variables are uppercase string assignments.
+TERMINAL = "ghostty"
+LAUNCHER = "fuzzel"
+MOD = "Mod4"
+
+-- Commands run once after zwwm initializes. Each entry is passed to `sh -c`.
+-- exec-sh-on-startup = ["waybar", "swww-daemon"]
+
+-- Bindings are: modifiers, key, action, argument.
+-- Modifiers use XKB names joined with "+". Supported actions are exec, reload,
+-- exit, focus, killactive, killsession, togglefloating, toggle-fullscreen, tag, and
+-- movetotag.
+bind = $MOD, Return, exec, $TERMINAL
+bind = $MOD, D, exec, $LAUNCHER
+bind = $MOD, Q, killactive, ""
+bind = $MOD, F, togglefloating, ""
+bind = $MOD, M, toggle-fullscreen, ""
+bind = $MOD, Tab, focus, ""
+bind = $MOD, R, reload, ""
+bind = "Mod4+Shift", Escape, exit, ""
+bind = $MOD, scrollback, zoomin, ""
+bind = $MOD, scrollforward, zoomout, ""
+
+bind = $MOD, "1", tag, "1"
+bind = $MOD, "2", tag, "2"
+bind = $MOD, "3", tag, "3"
+bind = $MOD, "4", tag, "4"
+bind = $MOD, "5", tag, "5"
+bind = $MOD, "6", tag, "6"
+bind = $MOD, "7", tag, "7"
+bind = $MOD, "8", tag, "8"
+bind = $MOD, "9", tag, "9"
+
+bind = "Mod4+Shift", "1", movetotag, "1"
+bind = "Mod4+Shift", "2", movetotag, "2"
+bind = "Mod4+Shift", "3", movetotag, "3"
+bind = "Mod4+Shift", "4", movetotag, "4"
+bind = "Mod4+Shift", "5", movetotag, "5"
+bind = "Mod4+Shift", "6", movetotag, "6"
+bind = "Mod4+Shift", "7", movetotag, "7"
+bind = "Mod4+Shift", "8", movetotag, "8"
+bind = "Mod4+Shift", "9", movetotag, "9"
+
+shaders = {
+  blur = {
+    role = "window"
+    source = "shaders/window.frag"
+    values = {
+      radius = 10
+      blur_radius = 8
+      blur_passes = 3
+      blur_brightness = 100
+      blur_contrast = 100
+      blur_saturation = 100
+      blur_noise = 0
+    }
+  }
+  border = {
+    role = "border"
+    source = "shaders/border.frag"
+    values = {
+      width = 3
+      radius = 10
+      color = "#2e3744"
+      focused_color = "#3da6f2"
+    }
+  }
+  background = {
+    role = "background"
+    source = "shaders/background.frag"
+    values = {
+      top_color = "#20242b"
+      bottom_color = "#13161b"
+    }
+  }
+}
+
+-- Window animation timing and curve controls.
+-- User-driven drags and resizes of standard and floating windows always
+-- snap instantly; open, close, and fullscreen transitions still animate.
+animations = {
+  enabled = true
+  duration-ms = 320
+  tag-duration-ms = 360
+  spring = { stiffness = 200 damping = 18 mass-per-mille = 1000 }
+  cubic-bezier = { x1 = 220 y1 = 0 x2 = 300 y2 = 1000 }
+  open-window = true
+  resize = true
+  close = true
+  open-scale-per-mille = 900
+  close-scale-per-mille = 800 -- Hyprland-style centered popin
+  open-offset-px = 0
+  close-offset-px = 0
+  tag-scale-per-mille = 1000
+  tag-parallax-per-mille = 1000
+  tag-fade-per-mille = 0
+}
+
+-- Layout defaults: master-stack, focus-fibonacci, or endless-canvas.
+-- Endless canvas pans by left-dragging an empty background; Super+left/right
+-- moves/resizes windows in persistent world coordinates.
+-- master-ratio accepts 10..90.
+layout = {
+  default = "master-stack"
+  master-count = 1
+  master-ratio = 60
+  outer-gap = 16
+  inner-gap = 12
+  smart-gaps = false
+}
+
+-- Focus mode is "by-click" or "hover". Reverse mouse scrolling gives wheel
+-- mice natural scrolling without changing touchpad finger scrolling.
+input = {
+  focus-mode = "by-click"
+  reverse-mouse-scrolling = false
+}
+
+-- XKB names. Empty rules/model/variant/options use libxkbcommon defaults.
+-- Multiple layouts and variants are comma-separated; group switching is set
+-- through options, for example "grp:alt_shift_toggle".
+keyboard = {
+  rules = ""
+  model = ""
+  layout = "us"
+  variant = ""
+  options = ""
+}
+
+-- Use the preferred output mode by default. scale-per-mille accepts 250..8000,
+-- bit-depth is 8 or 10, and transform is "normal", "90", "180", or "270".
+output = {
+  mode = "preferred"
+  scale-per-mille = 1000
+  bit-depth = 8
+  transform = "normal"
+}
+
+-- Environment inherited by programs launched from zwwm.
+environment = {
+  XDG_CURRENT_DESKTOP = "zwwm"
+  XDG_SESSION_DESKTOP = "zwwm"
+  XDG_SESSION_TYPE = "wayland"
+  XCURSOR_SIZE = "24"
+  TERMINAL = $TERMINAL
+}
+
+-- Rules use shell-style globs and apply in declaration order. A rule may match
+-- app-id, title, or both, then set floating, size, blur, blur-radius, or opacity.
+--
+-- rule = {
+--   match = { app-id = "org.example.*" title = "Preferences" }
+--   set = { floating = true size = "60%x70%" blur = true blur-radius = 12 opacity = 95 }
+-- }
+
+-- Layer rules match layer-shell namespaces and may set blur, blur-radius,
+-- ignore-alpha, and opacity. Layers are not blurred unless a matching rule
+-- enables it.
+--
+-- layer-rule = {
+--   match = { namespace = "waybar" }
+--   set = { blur = true blur-radius = 10 ignore-alpha = 10 opacity = 92 }
+-- }

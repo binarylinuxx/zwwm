@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="zwwm_screencopy_view_unstable_v1">
+  <copyright>
+    Copyright 2026 zwwm contributors
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+  </copyright>
+
+  <!--
+    This is deliberately the upstream wlr-screencopy v1 wire contract.  It is
+    public for ordinary direct screenshot clients such as grim; the zwwm
+    interfaces below provide zwwm's stream-oriented capture contract.
+  -->
+  <interface name="zwlr_screencopy_manager_v1" version="1">
+    <request name="capture_output">
+      <arg name="frame" type="new_id" interface="zwlr_screencopy_frame_v1"/>
+      <arg name="overlay_cursor" type="int"/>
+      <arg name="output" type="object" interface="wl_output"/>
+    </request>
+    <request name="capture_output_region">
+      <arg name="frame" type="new_id" interface="zwlr_screencopy_frame_v1"/>
+      <arg name="overlay_cursor" type="int"/>
+      <arg name="output" type="object" interface="wl_output"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </request>
+    <request name="destroy" type="destructor"/>
+  </interface>
+
+  <interface name="zwlr_screencopy_frame_v1" version="1">
+    <request name="copy">
+      <arg name="buffer" type="object" interface="wl_buffer"/>
+    </request>
+    <enum name="error">
+      <entry name="already_used" value="0"/>
+      <entry name="invalid_buffer" value="1"/>
+    </enum>
+    <enum name="flags" bitfield="true">
+      <entry name="y_invert" value="1"/>
+    </enum>
+    <event name="buffer">
+      <arg name="format" type="uint" enum="wl_shm.format"/>
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+      <arg name="stride" type="uint"/>
+    </event>
+    <event name="flags">
+      <arg name="flags" type="uint" enum="flags"/>
+    </event>
+    <event name="ready">
+      <arg name="tv_sec_hi" type="uint"/>
+      <arg name="tv_sec_lo" type="uint"/>
+      <arg name="tv_nsec" type="uint"/>
+    </event>
+    <event name="failed"/>
+    <request name="destroy" type="destructor"/>
+  </interface>
+
+  <interface name="zwwm_screencopy_view_manager_v1" version="1">
+    <description summary="zwwm output capture">
+      Captures completed output compositions and reports presentation timing.
+      Global visibility is compositor policy outside this wire contract.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        Existing frame objects remain valid one-shot snapshots and must still
+        be destroyed by the client.
+      </description>
+    </request>
+
+    <request name="capture_output">
+      <description summary="capture the current completed output composition">
+        The compositor captures without the cursor unless overlay_cursor is
+        non-zero. An unsupported cursor overlay produces a nonfatal unavailable
+        failure on the frame.
+      </description>
+      <arg name="frame" type="new_id" interface="zwwm_screencopy_frame_v1"/>
+      <arg name="output" type="object" interface="wl_output"/>
+      <arg name="overlay_cursor" type="int"/>
+    </request>
+
+    <request name="capture_output_region">
+      <description summary="capture a logical output region">
+        Coordinates are in the output's logical coordinate space. The
+        compositor clips the region to the output extent and
+        advertises the resulting physical pixel size after scale and
+        transform. An empty clipped region fails with unavailable.
+      </description>
+      <arg name="frame" type="new_id" interface="zwwm_screencopy_frame_v1"/>
+      <arg name="output" type="object" interface="wl_output"/>
+      <arg name="overlay_cursor" type="int"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </request>
+
+    <enum name="cursor_mode" bitfield="true">
+      <entry name="hidden" value="1"/>
+      <entry name="embedded" value="2"/>
+    </enum>
+
+    <event name="cursor_modes">
+      <description summary="cursor modes supported by this compositor backend">
+        Sent once after binding. Embedded is omitted when the active backend
+        cannot capture a compositor-owned cursor, including nested mode where
+        the parent compositor owns the visible cursor.
+      </description>
+      <arg name="modes" type="uint" enum="cursor_mode"/>
+    </event>
+
+    <event name="presented">
+      <description summary="a new output composition was presented">
+        Sent after presentation completion. Stream clients should coalesce
+        these events and request a capture only when their consumer has a
+        released buffer. The timestamp uses CLOCK_MONOTONIC.
+      </description>
+      <arg name="output" type="object" interface="wl_output"/>
+      <arg name="tv_sec_hi" type="uint"/>
+      <arg name="tv_sec_lo" type="uint"/>
+      <arg name="tv_nsec" type="uint"/>
+    </event>
+  </interface>
+
+  <interface name="zwwm_screencopy_frame_v1" version="1">
+    <description summary="one capture result">
+      The compositor sends buffer and flags before the client copies. A frame
+      accepts exactly one copy request, using a wl_shm buffer matching the
+      advertised format, dimensions, and stride. ready or failed is terminal;
+      clients must destroy the frame after either terminal event. The source is
+      always compositor output, never a captured client's backing buffer.
+    </description>
+
+    <enum name="error">
+      <entry name="already_used" value="0"/>
+      <entry name="invalid_buffer" value="1"/>
+    </enum>
+
+    <enum name="flags" bitfield="true">
+      <entry name="y_invert" value="1" summary="contents are y-inverted"/>
+    </enum>
+
+    <enum name="failure">
+      <entry name="unknown" value="0"/>
+      <entry name="source_lost" value="1"/>
+      <entry name="revoked" value="2"/>
+      <entry name="unavailable" value="3"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="cancel or release the frame">
+        Destroying before a terminal event cancels interest in the snapshot
+        and no further events are sent for this object.
+      </description>
+    </request>
+
+    <request name="copy">
+      <description summary="copy into the advertised wl_shm buffer">
+        Supplying a non-SHM buffer or one whose format, size, stride, offset,
+        or storage is insufficient is a protocol error. A second copy is a
+        protocol error. Source loss, compositor inability to capture, and
+        capture cancellation are nonfatal failed events instead.
+      </description>
+      <arg name="buffer" type="object" interface="wl_buffer"/>
+    </request>
+
+    <event name="buffer">
+      <arg name="format" type="uint" enum="wl_shm.format"/>
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+      <arg name="stride" type="uint"/>
+    </event>
+
+    <event name="flags">
+      <arg name="flags" type="uint" enum="flags"/>
+    </event>
+
+    <event name="ready">
+      <description summary="copy completed">
+        The timestamp uses CLOCK_MONOTONIC and identifies the completed
+        compositor snapshot copied into the client buffer.
+      </description>
+      <arg name="tv_sec_hi" type="uint"/>
+      <arg name="tv_sec_lo" type="uint"/>
+      <arg name="tv_nsec" type="uint"/>
+    </event>
+
+    <event name="failed">
+      <description summary="capture could not be completed or was revoked"/>
+      <arg name="reason" type="uint" enum="failure"/>
+    </event>
+  </interface>
+</protocol>

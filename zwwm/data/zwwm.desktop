@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=zwwm
+Comment=Post-Wayland compositor
+Exec=zwwm-session
+Type=Application
+DesktopNames=zwwm

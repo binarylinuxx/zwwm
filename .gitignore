@@ -1,0 +1,41 @@
+# Build trees
+/build/
+/build-*/
+/**/build/
+/**/build-*/
+
+# CMake and Ninja artifacts from accidental in-source builds
+**/CMakeFiles/
+**/CMakeCache.txt
+**/CTestTestfile.cmake
+**/cmake_install.cmake
+**/Makefile
+**/build.ninja
+**/.ninja_deps
+**/.ninja_log
+**/*_autogen/
+/Testing/
+
+# Nix outputs and local environments
+/result
+/result-*
+/.direnv/
+/.envrc.local
+
+# Runtime and diagnostic artifacts
+*.log
+*.out
+*.err
+*.pid
+*.sock
+core
+core.*
+
+# Editor and operating-system metadata
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

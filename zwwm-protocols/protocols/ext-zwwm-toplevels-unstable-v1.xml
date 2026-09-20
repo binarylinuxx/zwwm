@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="ext_zwwm_toplevels_unstable_v1">
+  <copyright>
+    Copyright 2026 zwwm contributors
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+  </copyright>
+
+  <interface name="ext_zwwm_toplevels_v1" version="1">
+    <description summary="capturable toplevel enumeration">
+      Enumerates toplevels available to this manager binding. Availability and
+      global visibility are compositor policy rather than part of this wire
+      contract.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="stop inventory observation">
+        All handles created by this manager are closed. No manager done event
+        follows destruction; clients should normally destroy handles first.
+      </description>
+    </request>
+
+    <event name="toplevel">
+      <description summary="a capturable toplevel became available">
+        The handle is opaque, is not a wl_surface or client object id, and is
+        valid only until its closed event. Its initial metadata is sent as
+        handle events before the manager done boundary.
+      </description>
+      <arg name="toplevel" type="new_id" interface="ext_zwwm_toplevel_handle_v1"/>
+    </event>
+
+    <event name="done">
+      <description summary="atomic inventory or update boundary">
+        Sent after all initial handles and their metadata, and after each batch
+        of live additions, changes, and closures. Clients must not present a
+        partially received batch.
+      </description>
+    </event>
+
+    <event name="finished">
+      <description summary="the inventory ended; no more events follow"/>
+    </event>
+  </interface>
+
+  <interface name="ext_zwwm_toplevel_handle_v1" version="1">
+    <description summary="one toplevel capture source">
+      Metadata may be empty when unavailable. A handle cannot be used after
+      closed, and closed is terminal.
+    </description>
+
+    <request name="destroy" type="destructor"/>
+
+    <request name="capture">
+      <description summary="capture the next toplevel frame">
+        This one-shot capture renders the selected client surface tree at
+        client-logical size. It excludes compositor decoration, effects,
+        opacity, animation, occlusion, and unrelated scene nodes. The cursor is
+        included only when requested and supported. The returned frame
+        advertises a SHM buffer contract; source loss is a nonfatal failure.
+      </description>
+      <arg name="frame" type="new_id" interface="zwwm_screencopy_frame_v1"/>
+      <arg name="overlay_cursor" type="int"/>
+    </request>
+
+    <event name="title">
+      <arg name="title" type="string"/>
+    </event>
+
+    <event name="app_id">
+      <arg name="app_id" type="string"/>
+    </event>
+
+    <event name="geometry">
+      <description summary="decorated logical rectangle in the current output"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </event>
+
+    <enum name="state" bitfield="true">
+      <entry name="maximized" value="1"/>
+      <entry name="fullscreen" value="2"/>
+      <entry name="activated" value="4"/>
+      <entry name="minimized" value="8"/>
+    </enum>
+
+    <event name="state">
+      <arg name="state" type="uint" enum="state"/>
+    </event>
+
+    <event name="output">
+      <description summary="current output, if it is available to this client"/>
+      <arg name="output" type="object" interface="wl_output" allow-null="true"/>
+    </event>
+
+    <event name="closed">
+      <description summary="the toplevel is no longer available; terminal"/>
+    </event>
+  </interface>
+</protocol>

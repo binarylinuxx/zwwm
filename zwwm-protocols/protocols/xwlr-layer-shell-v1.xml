@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="xwlr_layer_shell_v1">
+  <copyright>
+    Copyright 2026 zwwm contributors
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+  <interface name="xwlr_layer_shell_v1" version="1">
+    <description summary="zwwm layer-shell companion extension">This optional global augments an existing zwwm zwlr_layer_surface_v1; it does not replace the standard layer-shell protocol.</description>
+    <enum name="error"><entry name="invalid_layer_surface" value="0" summary="object is not this client's zwwm layer surface"/><entry name="extension_exists" value="1" summary="layer surface already has an extension"/></enum>
+    <request name="get_layer_surface"><arg name="id" type="new_id" interface="xwlr_layer_surface_v1"/><arg name="layer_surface" type="object" interface="zwlr_layer_surface_v1"/></request>
+    <request name="destroy" type="destructor"/>
+  </interface>
+  <interface name="xwlr_layer_surface_v1" version="1">
+    <description summary="double-buffered optional layer hints">State takes effect atomically with the associated wl_surface commit. Priority is in the signed 16-bit range [-32768, 32767]. Opacity is a wl_fixed value in [0, 1].</description>
+    <enum name="edge"><entry name="none" value="0"/><entry name="top" value="1"/><entry name="bottom" value="2"/><entry name="left" value="4"/><entry name="right" value="8"/></enum>
+    <enum name="error"><entry name="invalid_exclusive_edge" value="0"/><entry name="invalid_priority" value="1"/><entry name="invalid_opacity" value="2"/><entry name="invalid_surface_state" value="3"/></enum>
+    <enum name="report_code"><entry name="exclusive_zone_ignored" value="0"/></enum>
+    <request name="set_exclusive_edge"><arg name="edge" type="uint" enum="edge"/></request>
+    <request name="set_priority"><arg name="priority" type="int"/></request>
+    <request name="set_opacity"><arg name="opacity" type="fixed"/></request>
+    <request name="destroy" type="destructor"/>
+    <event name="report"><arg name="code" type="uint" enum="report_code"/><arg name="message" type="string"/></event>
+  </interface>
+</protocol>

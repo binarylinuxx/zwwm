@@ -1,0 +1,25 @@
+#pragma once
+
+namespace zwwm::renderer::shader {
+
+inline constexpr char surface_vertex[] = R"zwwm(
+@ZWWM_SURFACE_VERTEX_SHADER@
+)zwwm";
+
+inline constexpr char surface_fragment[] = R"zwwm(
+@ZWWM_SURFACE_FRAGMENT_SHADER@
+)zwwm";
+
+inline constexpr char glass_fragment[] = R"zwwm(
+@ZWWM_GLASS_FRAGMENT_SHADER@
+)zwwm";
+
+inline constexpr char kawase_vertex[] = R"zwwm(
+@ZWWM_KAWASE_VERTEX_SHADER@
+)zwwm";
+
+inline constexpr char kawase_fragment[] = R"zwwm(
+@ZWWM_KAWASE_FRAGMENT_SHADER@
+)zwwm";
+
+}  // namespace zwwm::renderer::shader

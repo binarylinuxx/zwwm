@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="zwwm_tags_unstable_v1">
+  <copyright>
+    Copyright 2026 zwwm contributors
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <interface name="zwwm_tags_v1" version="1">
+    <description summary="compositor tag state and control">
+      A tag is identified by its stable unsigned integer id. The compositor
+      sends the complete current tag list followed by done after binding and
+      after each change to that list. Global visibility is compositor policy.
+    </description>
+
+    <request name="destroy" type="destructor"/>
+
+    <request name="get_toplevel_tags">
+      <description summary="observe a toplevel's tag membership">
+        The toplevel must be visible to this manager binding.
+      </description>
+      <arg name="toplevel" type="object" interface="xdg_toplevel"/>
+    </request>
+
+    <request name="set_active_tags">
+      <description summary="select tags visible on the focused output">
+        The tags array contains packed uint32 tag ids. An empty array is valid
+        and requests that no tagged toplevels are visible.
+      </description>
+      <arg name="tags" type="array" summary="packed uint32 tag ids"/>
+    </request>
+
+    <request name="set_toplevel_tags">
+      <description summary="replace a toplevel's tag membership">
+        The tags array contains packed uint32 tag ids. The compositor validates
+        ids before applying the complete replacement.
+      </description>
+      <arg name="toplevel" type="object" interface="xdg_toplevel"/>
+      <arg name="tags" type="array" summary="packed uint32 tag ids"/>
+    </request>
+
+    <event name="tag">
+      <description summary="a tag exists">
+        Tag ids are never reused for the lifetime of this manager binding.
+      </description>
+      <arg name="id" type="uint" summary="stable tag id"/>
+      <arg name="name" type="string" summary="user-visible tag name"/>
+    </event>
+
+    <event name="tag_removed">
+      <arg name="id" type="uint" summary="removed tag id"/>
+    </event>
+
+    <event name="done">
+      <description summary="end of an atomic tag-list update"/>
+    </event>
+
+    <event name="active_tags">
+      <arg name="tags" type="array" summary="packed uint32 tag ids"/>
+    </event>
+
+    <event name="toplevel_tags">
+      <description summary="complete membership replacement for one toplevel">
+        The tags array contains packed uint32 tag ids in compositor-defined
+        order.
+      </description>
+      <arg name="toplevel" type="object" interface="xdg_toplevel"/>
+      <arg name="tags" type="array" summary="packed uint32 tag ids"/>
+    </event>
+
+    <event name="toplevel_closed">
+      <description summary="the observed toplevel was destroyed"/>
+      <arg name="toplevel" type="object" interface="xdg_toplevel"/>
+    </event>
+  </interface>
+</protocol>
