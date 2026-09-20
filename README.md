@@ -124,6 +124,8 @@ complete GLSL interface.
 - `xdg-desktop-portal-zwwm/`: desktop portal
 - `zwwmctl/`: `ext-zwwm-manager-v1` Wayland command-line client
 
+# Maintaince terms 
+- zwwm are built from the beginning to be clang compitable if you're maintaining zwwm for any distribution using GCC your issue very likely will get low priority assuming compiler quirks
 ## License
 
 zwwm is licensed under the [BSD 3-Clause License](LICENSE). Redistribution and
