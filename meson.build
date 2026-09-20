@@ -398,11 +398,6 @@ install_data(
 )
 install_data('zwwm/data/zwwm.desktop', install_dir: get_option('datadir') / 'wayland-sessions')
 install_data(
-  'README.md',
-  'CONFIG.md',
-  'CHANGELOG.md',
-  'CONTRIBUTING.md',
   'LICENSE',
-  'THIRD_PARTY.md',
   install_dir: get_option('datadir') / 'doc/zwwm',
 )
