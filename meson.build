@@ -403,7 +403,6 @@ install_data(
   'CHANGELOG.md',
   'CONTRIBUTING.md',
   'LICENSE',
-  'SECURITY.md',
   'THIRD_PARTY.md',
   install_dir: get_option('datadir') / 'doc/zwwm',
 )
