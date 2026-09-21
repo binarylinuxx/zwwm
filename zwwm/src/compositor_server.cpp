@@ -2810,7 +2810,7 @@ KeyboardLayoutInfo CompositorServer::keyboard_layout() const {
   const auto* keymap = impl_->seat_state.xkb_keymap_handle;
   const auto* state = impl_->seat_state.xkb_state_handle;
   if (keymap == nullptr || state == nullptr) return {};
-  const auto group = xkb_state_serialize_layout(state, XKB_STATE_LAYOUT_EFFECTIVE);
+  const auto group = xkb_state_serialize_layout(const_cast<xkb_state*>(state), XKB_STATE_LAYOUT_EFFECTIVE);
   const char* name = xkb_keymap_layout_get_name(keymap, group);
   return {name == nullptr ? "" : name, group};
 }
