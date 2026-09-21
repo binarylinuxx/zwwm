@@ -388,6 +388,63 @@ std::int32_t canvas_world_delta(std::int32_t screen_delta, const CanvasViewport&
       static_cast<long long>(std::numeric_limits<std::int32_t>::min()),
       static_cast<long long>(std::numeric_limits<std::int32_t>::max())));
 }
+std::pair<std::int64_t, std::int64_t> snap_canvas_window(
+    Observer* observer, SurfaceState* moving, OutputId output, std::uint8_t tag,
+    const CanvasViewport& viewport, std::int64_t x, std::int64_t y,
+    std::int32_t width, std::int32_t height) {
+  if (observer == nullptr || observer->surfaces == nullptr || observer->config == nullptr)
+    return {x, y};
+  const auto gap = static_cast<std::int64_t>(observer->config->layout.inner_gap);
+  const auto threshold = static_cast<std::int64_t>(
+      std::max(1, std::abs(canvas_world_delta(16, viewport))));
+  auto snapped_x = x;
+  auto snapped_y = y;
+  auto x_distance = threshold + 1;
+  auto y_distance = threshold + 1;
+  const auto near_range = [threshold](std::int64_t first_start, std::int64_t first_end,
+                                      std::int64_t second_start, std::int64_t second_end) {
+    return first_end + threshold >= second_start && second_end + threshold >= first_start;
+  };
+  const auto consider = [&](const CanvasBounds& other) {
+    if (!other.initialized) return;
+    const auto other_right = other.x + other.width;
+    const auto other_bottom = other.y + other.height;
+    if (near_range(y, y + height, other.y, other_bottom)) {
+      for (const auto target : {other.x - gap - width, other_right + gap}) {
+        const auto distance = std::abs(x - target);
+        if (distance <= threshold && distance < x_distance) {
+          snapped_x = target;
+          x_distance = distance;
+        }
+      }
+    }
+    if (near_range(x, x + width, other.x, other_right)) {
+      for (const auto target : {other.y - gap - height, other_bottom + gap}) {
+        const auto distance = std::abs(y - target);
+        if (distance <= threshold && distance < y_distance) {
+          snapped_y = target;
+          y_distance = distance;
+        }
+      }
+    }
+  };
+  for (auto* surface : *observer->surfaces) {
+    if (surface == nullptr || surface == moving || surface->parent != nullptr) continue;
+    if (auto* candidate = surface->xdg_surface;
+        candidate != nullptr && candidate->toplevel != nullptr && candidate->mapped &&
+        !candidate->fullscreen && candidate->output == output && candidate->tag == tag) {
+      consider(candidate->canvas_bounds);
+      continue;
+    }
+#ifdef ZWWM_XWAYLAND
+    if (auto* candidate = surface->xwayland_surface;
+        candidate != nullptr && candidate->window != nullptr && candidate->window->mapped &&
+        !candidate->fullscreen && candidate->output == output && candidate->tag == tag)
+      consider(candidate->canvas_bounds);
+#endif
+  }
+  return {snapped_x, snapped_y};
+}
 std::uint64_t monotonic_milliseconds() {
   return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -3480,8 +3537,13 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
         const auto world_dy = canvas_world_delta(dy, *viewport);
         const auto edge = impl_->seat_state.resize_edge;
         if (edge == protocol::XDG_TOPLEVEL_RESIZE_EDGE_NONE) {
-          xdg->canvas_bounds.x = impl_->seat_state.interactive_canvas_x + world_dx;
-          xdg->canvas_bounds.y = impl_->seat_state.interactive_canvas_y + world_dy;
+          const auto snapped = snap_canvas_window(
+              &impl_->observer, impl_->seat_state.interactive, xdg->output, xdg->tag, *viewport,
+              impl_->seat_state.interactive_canvas_x + world_dx,
+              impl_->seat_state.interactive_canvas_y + world_dy,
+              xdg->canvas_bounds.width, xdg->canvas_bounds.height);
+          xdg->canvas_bounds.x = snapped.first;
+          xdg->canvas_bounds.y = snapped.second;
         } else {
           const auto original_right = impl_->seat_state.interactive_canvas_x + impl_->seat_state.interactive_canvas_width;
           const auto original_bottom = impl_->seat_state.interactive_canvas_y + impl_->seat_state.interactive_canvas_height;
@@ -3557,8 +3619,13 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
       const auto world_dy = canvas_world_delta(dy, *viewport);
       const auto edge = impl_->seat_state.resize_edge;
       if (edge == protocol::XDG_TOPLEVEL_RESIZE_EDGE_NONE) {
-        role->canvas_bounds.x = impl_->seat_state.interactive_canvas_x + world_dx;
-        role->canvas_bounds.y = impl_->seat_state.interactive_canvas_y + world_dy;
+        const auto snapped = snap_canvas_window(
+            &impl_->observer, impl_->seat_state.interactive, role->output, role->tag, *viewport,
+            impl_->seat_state.interactive_canvas_x + world_dx,
+            impl_->seat_state.interactive_canvas_y + world_dy,
+            role->canvas_bounds.width, role->canvas_bounds.height);
+        role->canvas_bounds.x = snapped.first;
+        role->canvas_bounds.y = snapped.second;
       } else {
         const auto original_right = impl_->seat_state.interactive_canvas_x + impl_->seat_state.interactive_canvas_width;
         const auto original_bottom = impl_->seat_state.interactive_canvas_y + impl_->seat_state.interactive_canvas_height;

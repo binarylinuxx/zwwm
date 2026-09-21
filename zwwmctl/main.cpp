@@ -339,6 +339,10 @@ int main(int argc, char** argv) {
     client.result = client.display->find_proxy(result_id);
   } else if (command == "setcursor") {
     if (arguments.size() != 2) { usage(argv[0]); return EXIT_FAILURE; }
+    if (client.manager->version < 3) {
+      std::fputs("zwwmctl: setcursor requires restarting zwwm with manager protocol version 3\n", stderr);
+      return EXIT_FAILURE;
+    }
     char* end = nullptr;
     const unsigned long parsed_size = std::strtoul(arguments[1].c_str(), &end, 10);
     if (end == arguments[1].c_str() || *end != '\0' || parsed_size == 0 || parsed_size > 1024) {
