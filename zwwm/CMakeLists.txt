@@ -19,11 +19,22 @@ if(XWAYLAND_ENABLE)
   pkg_check_modules(XCB_XFIXES REQUIRED IMPORTED_TARGET xcb-xfixes)
 endif()
 
-add_library(zwwm_master_stack STATIC src/master_stack.cpp)
+add_library(zwwm_master_stack STATIC src/layout/master_stack.cpp)
 target_include_directories(zwwm_master_stack PUBLIC include)
 target_link_libraries(zwwm_master_stack PUBLIC zwwm::renderer)
 target_compile_options(zwwm_master_stack PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_library(zwwm::master_stack ALIAS zwwm_master_stack)
+
+add_library(zwwm_canvas STATIC src/layout/canvas.cpp)
+target_include_directories(zwwm_canvas PUBLIC include)
+target_compile_options(zwwm_canvas PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_library(zwwm::canvas ALIAS zwwm_canvas)
+
+add_library(zwwm_focus_fibonacci STATIC src/layout/focus_fibonacci.cpp)
+target_include_directories(zwwm_focus_fibonacci PUBLIC include)
+target_link_libraries(zwwm_focus_fibonacci PUBLIC zwwm::master_stack)
+target_compile_options(zwwm_focus_fibonacci PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_library(zwwm::focus_fibonacci ALIAS zwwm_focus_fibonacci)
 
 add_library(zwwm_animation STATIC src/animation.cpp)
 target_include_directories(zwwm_animation PUBLIC include)
@@ -51,7 +62,7 @@ add_library(zwwm_compositor STATIC
   src/compositor_server_surface_extensions.cpp
 )
 target_include_directories(zwwm_compositor PUBLIC include)
-target_link_libraries(zwwm_compositor PUBLIC zwayland-server PkgConfig::XKBCOMMON zwwm::protocol_metadata zwwm::runtime_config zwwm::master_stack zwwm::renderer)
+target_link_libraries(zwwm_compositor PUBLIC zwayland-server PkgConfig::XKBCOMMON zwwm::protocol_metadata zwwm::runtime_config zwwm::master_stack zwwm::canvas zwwm::focus_fibonacci zwwm::renderer)
 if(XWAYLAND_ENABLE)
   target_sources(zwwm_compositor PRIVATE
     src/compositor_server_xwayland.cpp
@@ -105,6 +116,16 @@ install(FILES "${CMAKE_SOURCE_DIR}/README.md" "${CMAKE_SOURCE_DIR}/CONFIG.md"
         DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 
 if(BUILD_TESTING)
+  add_executable(zwwm_canvas_tests tests/canvas_test.cpp)
+  target_link_libraries(zwwm_canvas_tests PRIVATE zwwm::canvas)
+  target_compile_options(zwwm_canvas_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME zwwm_canvas_tests COMMAND zwwm_canvas_tests)
+
+  add_executable(zwwm_focus_fibonacci_tests tests/focus_fibonacci_test.cpp)
+  target_link_libraries(zwwm_focus_fibonacci_tests PRIVATE zwwm::focus_fibonacci)
+  target_compile_options(zwwm_focus_fibonacci_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME zwwm_focus_fibonacci_tests COMMAND zwwm_focus_fibonacci_tests)
+
   add_executable(zwwm_surface_lifetime_tests tests/surface_lifetime_test.cpp)
   target_link_libraries(zwwm_surface_lifetime_tests PRIVATE zwwm_compositor)
   if(XWAYLAND_ENABLE)

@@ -1,4 +1,5 @@
 #include "zwwm/nested_backend.hpp"
+#include "backend/scene.hpp"
 #include "zwwm/layout/master_stack.hpp"
 #include "zwwm/renderer/egl_dmabuf_importer.hpp"
 #include "zwwm/renderer/opengl.hpp"
@@ -163,48 +164,11 @@ struct EmbeddedCursor {
 
 std::unordered_map<const NestedBackend*, EmbeddedCursor> embedded_cursors;
 
-template <typename Window>
-renderer::Rect base_assigned_tile(const Window& window) {
-  return {{window.assigned_tile_x, window.assigned_tile_y},
-          {static_cast<std::uint32_t>(std::max(0, window.assigned_tile_width)),
-           static_cast<std::uint32_t>(std::max(0, window.assigned_tile_height))}};
-}
-
-template <typename Window>
-renderer::Rect assigned_tile(const Window& window) {
-  const auto base = base_assigned_tile(window);
-  const double scale = window.camera_scale;
-  const auto left = static_cast<std::int32_t>(std::lround(
-      window.camera_center_x + (base.origin.x - window.camera_center_x) * scale));
-  const auto top = static_cast<std::int32_t>(std::lround(
-      window.camera_center_y + (base.origin.y - window.camera_center_y) * scale));
-  const auto right = static_cast<std::int32_t>(std::lround(
-      window.camera_center_x + (static_cast<double>(base.origin.x) + base.size.width - window.camera_center_x) * scale));
-  const auto bottom = static_cast<std::int32_t>(std::lround(
-      window.camera_center_y + (static_cast<double>(base.origin.y) + base.size.height - window.camera_center_y) * scale));
-  return {{left, top}, {static_cast<std::uint32_t>(std::max<std::int64_t>(1, static_cast<std::int64_t>(right) - left)),
-                       static_cast<std::uint32_t>(std::max<std::int64_t>(1, static_cast<std::int64_t>(bottom) - top))}};
-}
-
-template <typename Window>
-renderer::Rect animated_content(const Window& window, const renderer::Rect& tile) {
-  const auto original = base_assigned_tile(window);
-  if (original.size.width == 0 || original.size.height == 0) return tile;
-  const auto project_x = [&](std::int64_t x) {
-    return tile.origin.x + static_cast<std::int32_t>(std::lround(
-        static_cast<double>(x - original.origin.x) * tile.size.width / original.size.width));
-  };
-  const auto project_y = [&](std::int64_t y) {
-    return tile.origin.y + static_cast<std::int32_t>(std::lround(
-        static_cast<double>(y - original.origin.y) * tile.size.height / original.size.height));
-  };
-  const auto left = project_x(window.assigned_content_x);
-  const auto top = project_y(window.assigned_content_y);
-  const auto right = project_x(static_cast<std::int64_t>(window.assigned_content_x) + window.assigned_content_width);
-  const auto bottom = project_y(static_cast<std::int64_t>(window.assigned_content_y) + window.assigned_content_height);
-  return {{left, top}, {static_cast<std::uint32_t>(std::max(0, right - left)),
-                       static_cast<std::uint32_t>(std::max(0, bottom - top))}};
-}
+using backend_scene::animated_content;
+using backend_scene::animated_decoration_scale;
+using backend_scene::assigned_tile;
+using backend_scene::source_uv;
+using backend_scene::window_geometry;
 
 std::uint64_t monotonic_ms() {
   return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -254,36 +218,6 @@ GLuint snapshot_texture(GLuint source, int width, int height) {
   glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(previous_framebuffer));
   glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previous_texture));
   return copy;
-}
-
-struct WindowGeometry { int x; int y; int width; int height; };
-
-template <typename Window>
-WindowGeometry window_geometry(const Window& window) {
-  const int left = std::clamp(window.geometry_x, 0, window.width);
-  const int top = std::clamp(window.geometry_y, 0, window.height);
-  const int right = static_cast<int>(std::clamp<std::int64_t>(static_cast<std::int64_t>(window.geometry_x) + window.geometry_width, left, window.width));
-  const int bottom = static_cast<int>(std::clamp<std::int64_t>(static_cast<std::int64_t>(window.geometry_y) + window.geometry_height, top, window.height));
-  if (right == left || bottom == top) return {0, 0, window.width, window.height};
-  return {left, top, right - left, bottom - top};
-}
-
-template <typename Window>
-float animated_decoration_scale(const Window& window, const renderer::Rect& tile) {
-  const auto original = base_assigned_tile(window);
-  if (original.size.width == 0 || original.size.height == 0) return 1.0F;
-  return std::max(0.0F, std::min(static_cast<float>(tile.size.width) / original.size.width,
-                                 static_cast<float>(tile.size.height) / original.size.height));
-}
-
-template <typename Window>
-std::array<float, 4> source_uv(const WindowGeometry& geometry, const Window& window) {
-  const float width = window.source_right - window.source_left;
-  const float height = window.source_bottom - window.source_top;
-  return {window.source_left + width * geometry.x / window.width,
-          window.source_top + height * geometry.y / window.height,
-          window.source_left + width * (geometry.x + geometry.width) / window.width,
-          window.source_top + height * (geometry.y + geometry.height) / window.height};
 }
 
 bool inside_rounded_rect(int x, int y, int left, int top, int width, int height, int radius) {

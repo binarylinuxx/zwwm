@@ -204,7 +204,7 @@ zwwm_inc = include_directories('zwwm/include')
 xkbcommon = dependency('xkbcommon')
 zwwm_master_stack = static_library(
   'zwwm_master_stack',
-  'zwwm/src/master_stack.cpp',
+  'zwwm/src/layout/master_stack.cpp',
   include_directories: zwwm_inc,
   dependencies: zwwm_renderer_dep,
   cpp_args: strict_cpp,
@@ -241,6 +241,30 @@ zwwm_runtime_config_dep = declare_dependency(
   dependencies: [zwayland_server_dep, xkbcommon, zw_lang_dep, zwwm_master_stack_dep, zwwm_animation_dep],
 )
 
+zwwm_canvas = static_library(
+  'zwwm_canvas',
+  'zwwm/src/layout/canvas.cpp',
+  include_directories: zwwm_inc,
+  cpp_args: strict_cpp,
+)
+zwwm_canvas_dep = declare_dependency(
+  link_with: zwwm_canvas,
+  include_directories: zwwm_inc,
+)
+
+zwwm_focus_fibonacci = static_library(
+  'zwwm_focus_fibonacci',
+  'zwwm/src/layout/focus_fibonacci.cpp',
+  include_directories: zwwm_inc,
+  dependencies: zwwm_master_stack_dep,
+  cpp_args: strict_cpp,
+)
+zwwm_focus_fibonacci_dep = declare_dependency(
+  link_with: zwwm_focus_fibonacci,
+  include_directories: zwwm_inc,
+  dependencies: zwwm_master_stack_dep,
+)
+
 compositor_sources = files(
   'zwwm/src/compositor_server.cpp',
   'zwwm/src/compositor_server_buffers.cpp',
@@ -257,6 +281,8 @@ compositor_deps = [
   xkbcommon,
   zwwm_runtime_config_dep,
   zwwm_master_stack_dep,
+  zwwm_canvas_dep,
+  zwwm_focus_fibonacci_dep,
   zwwm_renderer_dep,
 ]
 compositor_args = strict_cpp

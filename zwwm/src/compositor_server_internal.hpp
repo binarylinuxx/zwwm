@@ -11,6 +11,8 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "zwwm/runtime_config.hpp"
+#include "zwwm/layout/canvas.hpp"
+#include "zwwm/layout/focus_fibonacci.hpp"
 #include "zwwm/unique_fd.hpp"
 
 #include <array>
@@ -51,21 +53,10 @@ struct XwaylandSelection;
 struct XwaylandSurfaceState;
 #endif
 
-struct CanvasBounds {
-  std::int64_t x = 0, y = 0;
-  std::int32_t width = 0, height = 0;
-  bool initialized = false;
-};
-struct CanvasViewport {
-  double x = 0.0, y = 0.0;
-  double scale = 1.0;
-  double zoom_log_velocity = 0.0;
-  std::uint64_t last_zoom_tick_ms = 0;
-};
+using CanvasBounds = layout::CanvasBounds;
+using CanvasViewport = layout::CanvasViewport;
 
 struct OutputState {
-  struct FibonacciLeaf { std::uint64_t id = 0; std::vector<bool> path; };
-
   OutputInfo info;
   std::uint32_t global = 0;
   std::vector<zwayland::server::Resource*> resources;
@@ -74,7 +65,7 @@ struct OutputState {
   SurfaceState* fullscreen = nullptr;
   std::optional<float> master_ratio;
   std::unordered_map<std::uint64_t, float> tile_weights;
-  std::array<std::vector<FibonacciLeaf>, 9> fibonacci_leaves;
+  std::array<std::vector<layout::FibonacciLeaf>, 9> fibonacci_leaves;
   std::array<CanvasViewport, 9> canvas_viewports;
   bool retired = false;
 };
@@ -107,7 +98,7 @@ struct Observer {
 struct Pool { void* mapping = nullptr; std::size_t size = 0; UniqueFd fd; std::size_t buffers = 0; bool destroyed = false; };
 struct Buffer { Pool* pool = nullptr; zwayland::server::Resource* resource = nullptr; std::size_t references = 1; std::int32_t offset = 0, width = 0, height = 0, stride = 0; std::uint32_t format = 0; std::optional<renderer::DmabufAttributes> dmabuf; };
 struct DmabufState { std::vector<std::pair<std::uint32_t, std::uint64_t>> formats; std::optional<dev_t> main_device; };
-struct Rect { std::int32_t x, y, width, height; };
+using Rect = layout::CanvasRect;
 struct RegionState { std::vector<Rect> rects; };
 
 struct ViewportConfig {

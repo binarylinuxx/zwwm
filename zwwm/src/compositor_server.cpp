@@ -362,88 +362,30 @@ CanvasViewport* canvas_viewport(Observer* observer, OutputId id, std::uint8_t ta
   auto* output = output_state(observer, id);
   return output == nullptr || tag < 1 || tag > 9 ? nullptr : &output->canvas_viewports[tag - 1];
 }
-Rect canvas_view_bounds(const CanvasBounds& bounds, const CanvasViewport& viewport, Rect work) {
-  const auto coordinate = [](double value) {
-    return static_cast<std::int32_t>(std::clamp(
-        std::round(value), static_cast<double>(std::numeric_limits<std::int32_t>::min()),
-        static_cast<double>(std::numeric_limits<std::int32_t>::max())));
-  };
-  const auto left = coordinate(work.x + (bounds.x - viewport.x) * viewport.scale);
-  const auto top = coordinate(work.y + (bounds.y - viewport.y) * viewport.scale);
-  const auto right = coordinate(work.x + (bounds.x + bounds.width - viewport.x) * viewport.scale);
-  const auto bottom = coordinate(work.y + (bounds.y + bounds.height - viewport.y) * viewport.scale);
-  return {left, top, static_cast<std::int32_t>(std::max<std::int64_t>(1, static_cast<std::int64_t>(right) - left)),
-          static_cast<std::int32_t>(std::max<std::int64_t>(1, static_cast<std::int64_t>(bottom) - top))};
-}
-Rect canvas_intrinsic_bounds(const CanvasBounds& bounds, const CanvasViewport& viewport, Rect work) {
-  const double center_x = viewport.x + work.width / (2.0 * viewport.scale);
-  const double center_y = viewport.y + work.height / (2.0 * viewport.scale);
-  return {static_cast<std::int32_t>(std::lround(work.x + work.width / 2.0 + bounds.x - center_x)),
-          static_cast<std::int32_t>(std::lround(work.y + work.height / 2.0 + bounds.y - center_y)),
-          bounds.width, bounds.height};
-}
-std::int32_t canvas_world_delta(std::int32_t screen_delta, const CanvasViewport& viewport) {
-  return static_cast<std::int32_t>(std::clamp(
-      std::llround(static_cast<double>(screen_delta) / viewport.scale),
-      static_cast<long long>(std::numeric_limits<std::int32_t>::min()),
-      static_cast<long long>(std::numeric_limits<std::int32_t>::max())));
-}
 std::pair<std::int64_t, std::int64_t> snap_canvas_window(
     Observer* observer, SurfaceState* moving, OutputId output, std::uint8_t tag,
     const CanvasViewport& viewport, std::int64_t x, std::int64_t y,
     std::int32_t width, std::int32_t height) {
   if (observer == nullptr || observer->surfaces == nullptr || observer->config == nullptr)
     return {x, y};
-  const auto gap = static_cast<std::int64_t>(observer->config->layout.inner_gap);
-  const auto threshold = static_cast<std::int64_t>(
-      std::max(1, std::abs(canvas_world_delta(16, viewport))));
-  auto snapped_x = x;
-  auto snapped_y = y;
-  auto x_distance = threshold + 1;
-  auto y_distance = threshold + 1;
-  const auto near_range = [threshold](std::int64_t first_start, std::int64_t first_end,
-                                      std::int64_t second_start, std::int64_t second_end) {
-    return first_end + threshold >= second_start && second_end + threshold >= first_start;
-  };
-  const auto consider = [&](const CanvasBounds& other) {
-    if (!other.initialized) return;
-    const auto other_right = other.x + other.width;
-    const auto other_bottom = other.y + other.height;
-    if (near_range(y, y + height, other.y, other_bottom)) {
-      for (const auto target : {other.x - gap - width, other_right + gap}) {
-        const auto distance = std::abs(x - target);
-        if (distance <= threshold && distance < x_distance) {
-          snapped_x = target;
-          x_distance = distance;
-        }
-      }
-    }
-    if (near_range(x, x + width, other.x, other_right)) {
-      for (const auto target : {other.y - gap - height, other_bottom + gap}) {
-        const auto distance = std::abs(y - target);
-        if (distance <= threshold && distance < y_distance) {
-          snapped_y = target;
-          y_distance = distance;
-        }
-      }
-    }
-  };
+  std::vector<CanvasBounds> candidates;
   for (auto* surface : *observer->surfaces) {
     if (surface == nullptr || surface == moving || surface->parent != nullptr) continue;
     if (auto* candidate = surface->xdg_surface;
         candidate != nullptr && candidate->toplevel != nullptr && candidate->mapped &&
         !candidate->fullscreen && candidate->output == output && candidate->tag == tag) {
-      consider(candidate->canvas_bounds);
+      candidates.push_back(candidate->canvas_bounds);
       continue;
     }
 #ifdef ZWWM_XWAYLAND
     if (auto* candidate = surface->xwayland_surface;
         candidate != nullptr && candidate->window != nullptr && candidate->window->mapped &&
         !candidate->fullscreen && candidate->output == output && candidate->tag == tag)
-      consider(candidate->canvas_bounds);
+      candidates.push_back(candidate->canvas_bounds);
 #endif
   }
-  return {snapped_x, snapped_y};
+  return layout::snap_canvas_window(x, y, width, height, candidates,
+                                    observer->config->layout.inner_gap, viewport);
 }
 std::uint64_t monotonic_milliseconds() {
   return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -516,32 +458,6 @@ void zoom_canvas(Observer* observer, SeatState* seat, bool zoom_in) {
   seat->cursor_override_shape = zoom_in ? "zoom-in" : "zoom-out";
   apply_cursor_shape(seat);
   loop.update_timer(seat->canvas_zoom_timer, 1);
-}
-void initialize_canvas_bounds(CanvasBounds& bounds, Rect previous, Rect work,
-                              const CanvasViewport& viewport, std::int32_t content_width,
-                              std::int32_t content_height, std::uint32_t border_width) {
-  if (bounds.initialized) return;
-  if (previous.width > 0 && previous.height > 0) {
-    bounds = {.x = static_cast<std::int64_t>(std::llround(
-                  viewport.x + (previous.x - work.x) / viewport.scale)),
-              .y = static_cast<std::int64_t>(std::llround(
-                  viewport.y + (previous.y - work.y) / viewport.scale)),
-              .width = previous.width, .height = previous.height, .initialized = true};
-    return;
-  }
-  const auto border = static_cast<std::int32_t>(std::min<std::uint32_t>(
-      border_width, static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max() / 2)));
-  const auto width = content_width > 0 ?
-      std::max(1, content_width + std::min(border * 2, std::numeric_limits<std::int32_t>::max() - content_width)) :
-      std::max(1, work.width / 2);
-  const auto height = content_height > 0 ?
-      std::max(1, content_height + std::min(border * 2, std::numeric_limits<std::int32_t>::max() - content_height)) :
-      std::max(1, work.height / 2);
-  bounds = {.x = static_cast<std::int64_t>(std::llround(
-                viewport.x + (work.width / viewport.scale - width) / 2.0)),
-            .y = static_cast<std::int64_t>(std::llround(
-                viewport.y + (work.height / viewport.scale - height) / 2.0)),
-            .width = width, .height = height, .initialized = true};
 }
 Rect clamp_window(Rect rect, Rect area) {
   rect.width = std::clamp(rect.width, 1, std::max(1, area.width));
@@ -767,70 +683,16 @@ std::vector<layout::Placement> root_placements(const Observer* observer, const X
   auto* output_state_value = output_state(const_cast<Observer*>(observer), output);
   if (observer->config->layout.kind == LayoutConfig::Kind::focus_fibonacci && output_state_value != nullptr) {
     auto& leaves = output_state_value->fibonacci_leaves[output_state_value->active_tag - 1];
-    std::erase_if(leaves, [&roots](const OutputState::FibonacciLeaf& leaf) {
-      return std::find(roots.begin(), roots.end(), leaf.id) == roots.end();
-    });
-    while (!leaves.empty()) {
-      bool collapsed = false;
-      for (const auto& candidate_leaf : leaves) {
-        for (std::size_t depth = candidate_leaf.path.size(); depth > 0 && !collapsed; --depth) {
-          std::vector<bool> parent(candidate_leaf.path.begin(),
-                                   candidate_leaf.path.begin() + static_cast<std::ptrdiff_t>(depth - 1));
-          bool first = false, second = false;
-          for (const auto& leaf : leaves) if (leaf.path.size() >= depth &&
-              std::equal(parent.begin(), parent.end(), leaf.path.begin())) {
-            if (leaf.path[depth - 1]) second = true; else first = true;
-          }
-          if (first == second) continue;
-          for (auto& leaf : leaves) if (leaf.path.size() >= depth &&
-              std::equal(parent.begin(), parent.end(), leaf.path.begin()))
-            leaf.path.erase(leaf.path.begin() + static_cast<std::ptrdiff_t>(depth - 1));
-          collapsed = true;
-        }
-        if (collapsed) break;
-      }
-      if (!collapsed) break;
-    }
-    for (const auto id : roots) {
-      if (std::any_of(leaves.begin(), leaves.end(), [id](const auto& leaf) { return leaf.id == id; })) continue;
-      if (leaves.empty()) { leaves.push_back({id, {}}); continue; }
-      const auto focused_id = observer->seat == nullptr || root(observer->seat->toplevel_focus) == nullptr ? 0 :
-                              root(observer->seat->toplevel_focus)->id;
-      auto target = std::find_if(leaves.begin(), leaves.end(), [focused_id](const auto& leaf) { return leaf.id == focused_id; });
-      if (target == leaves.end()) target = std::prev(leaves.end());
-      auto new_path = target->path;
-      target->path.push_back(false);
-      new_path.push_back(true);
-      leaves.push_back({id, std::move(new_path)});
-    }
+    const auto focused_id = observer->seat == nullptr || root(observer->seat->toplevel_focus) == nullptr ? 0 :
+                            root(observer->seat->toplevel_focus)->id;
+    layout::reconcile_fibonacci_leaves(leaves, roots, focused_id);
     const std::int32_t outer_gap = observer->config->layout.smart_gaps && leaves.size() == 1 ? 0 :
                                    static_cast<std::int32_t>(observer->config->layout.outer_gap);
     const std::int32_t inner_gap = static_cast<std::int32_t>(observer->config->layout.inner_gap);
-    const std::int64_t left = static_cast<std::int64_t>(area.x) + outer_gap;
-    const std::int64_t top = static_cast<std::int64_t>(area.y) + outer_gap;
-    const std::int64_t width = std::max<std::int64_t>(1, static_cast<std::int64_t>(area.width) - 2LL * outer_gap);
-    const std::int64_t height = std::max<std::int64_t>(1, static_cast<std::int64_t>(area.height) - 2LL * outer_gap);
-    std::vector<layout::Placement> placements;
-    placements.reserve(leaves.size());
-    for (const auto& leaf : leaves) {
-      std::int64_t x = left, y = top, w = width, h = height;
-      for (std::size_t depth = 0; depth < leaf.path.size(); ++depth) {
-        const bool second = leaf.path[depth];
-        if (depth % 2 == 0) {
-          const auto gap = std::min<std::int64_t>(inner_gap, std::max<std::int64_t>(0, w - 2));
-          const auto first = (w - gap) / 2;
-          if (second) { x += first + gap; w -= first + gap; } else w = first;
-        } else {
-          const auto gap = std::min<std::int64_t>(inner_gap, std::max<std::int64_t>(0, h - 2));
-          const auto first = (h - gap) / 2;
-          if (second) { y += first + gap; h -= first + gap; } else h = first;
-        }
-      }
-      placements.push_back({leaf.id, {{static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)},
-                                      {static_cast<std::uint32_t>(std::max<std::int64_t>(1, w)),
-                                       static_cast<std::uint32_t>(std::max<std::int64_t>(1, h))}}});
-    }
-    return placements;
+    return layout::arrange_focus_fibonacci(
+        leaves, {{area.x, area.y}, {static_cast<std::uint32_t>(area.width),
+                                    static_cast<std::uint32_t>(area.height)}},
+        outer_gap, inner_gap);
   }
   if (output_state_value == nullptr || (!output_state_value->master_ratio && output_state_value->tile_weights.empty()))
     return observer->config->placements(roots, {{area.x, area.y}, {static_cast<std::uint32_t>(area.width), static_cast<std::uint32_t>(area.height)}});
@@ -914,7 +776,7 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
       const Rect work = output_work(observer, x->output);
       auto* viewport = canvas_viewport(observer, x->output, x->tag);
       if (viewport == nullptr) continue;
-      initialize_canvas_bounds(x->canvas_bounds, x->fullscreen ? Rect{} : x->tile_bounds, work, *viewport,
+      layout::initialize_canvas_bounds(x->canvas_bounds, x->fullscreen ? Rect{} : x->tile_bounds, work, *viewport,
                                x->window_geometry_set ? x->window_geometry.width : 0,
                                x->window_geometry_set ? x->window_geometry.height : 0, border);
       Rect bounds;
@@ -924,7 +786,7 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
         bounds = output_work(observer, x->output, true);
         states |= kFullscreenState;
       } else {
-        bounds = canvas_view_bounds(x->canvas_bounds, *viewport, work);
+        bounds = layout::canvas_view_bounds(x->canvas_bounds, *viewport, work);
       }
       const auto content = x->fullscreen ?
           renderer::Rect{{bounds.x, bounds.y}, {static_cast<std::uint32_t>(bounds.width),
@@ -960,14 +822,14 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
         role->window->requested_bounds.width : static_cast<std::int32_t>(role->window->width);
     const auto requested_height = role->window->requested_bounds.height > 1 ?
         role->window->requested_bounds.height : static_cast<std::int32_t>(role->window->height);
-    initialize_canvas_bounds(role->canvas_bounds, role->fullscreen ? Rect{} : role->tile_bounds, work, *viewport,
+    layout::initialize_canvas_bounds(role->canvas_bounds, role->fullscreen ? Rect{} : role->tile_bounds, work, *viewport,
                              requested_width > 1 ? requested_width : 0,
                              requested_height > 1 ? requested_height : 0, border);
     Rect bounds;
     if (role->fullscreen) {
       bounds = output_work(observer, role->output, true);
     } else {
-      bounds = canvas_view_bounds(role->canvas_bounds, *viewport, work);
+      bounds = layout::canvas_view_bounds(role->canvas_bounds, *viewport, work);
     }
     const auto content = role->fullscreen ?
         renderer::Rect{{bounds.x, bounds.y}, {static_cast<std::uint32_t>(bounds.width),
@@ -1316,7 +1178,7 @@ void notify_surface(SurfaceState* s) {
         const auto work = output_work(s->observer, xdg_root->output);
         const auto* viewport = canvas_viewport(s->observer, xdg_root->output, xdg_root->tag);
         if (viewport != nullptr) {
-          const auto tile = canvas_intrinsic_bounds(xdg_root->canvas_bounds, *viewport, work);
+          const auto tile = layout::canvas_intrinsic_bounds(xdg_root->canvas_bounds, *viewport, work);
           const auto content = s->observer->config->content_bounds(
               {{tile.x, tile.y}, {static_cast<std::uint32_t>(tile.width),
                                   static_cast<std::uint32_t>(tile.height)}});
@@ -1347,7 +1209,7 @@ void notify_surface(SurfaceState* s) {
          const auto work = output_work(s->observer, role->output);
          const auto* viewport = canvas_viewport(s->observer, role->output, role->tag);
          if (viewport != nullptr) {
-           const auto tile = canvas_intrinsic_bounds(role->canvas_bounds, *viewport, work);
+           const auto tile = layout::canvas_intrinsic_bounds(role->canvas_bounds, *viewport, work);
            const auto content = s->observer->config->content_bounds(
                {{tile.x, tile.y}, {static_cast<std::uint32_t>(tile.width),
                                    static_cast<std::uint32_t>(tile.height)}});
@@ -3212,26 +3074,21 @@ bool CompositorServer::dispatch_action(const std::string& action, const std::str
       }
       const auto origin = center_of(focused);
       const auto output = output_of(focused);
-      SurfaceState* nearest = nullptr;
-      double nearest_distance = std::numeric_limits<double>::infinity();
+      std::vector<SurfaceState*> directional;
+      std::vector<layout::FocusPoint> centers;
       for (auto* candidate : visible) {
         if (candidate == focused || output_of(candidate) != output) continue;
         const auto center = center_of(candidate);
-        const double dx = center.first - origin.first;
-        const double dy = center.second - origin.second;
-        const bool direction_matches = argument == "left" ? dx < 0.0 :
-            argument == "right" ? dx > 0.0 : argument == "up" ? dy < 0.0 : dy > 0.0;
-        if (!direction_matches) continue;
-        const double primary = argument == "left" || argument == "right" ? dx : dy;
-        const double secondary = argument == "left" || argument == "right" ? dy : dx;
-        const double distance = primary * primary + secondary * secondary * 2.0;
-        if (distance < nearest_distance) {
-          nearest = candidate;
-          nearest_distance = distance;
-        }
+        directional.push_back(candidate);
+        centers.push_back({center.first, center.second});
       }
-      if (nearest == nullptr) return fail("no visible window in that direction");
-      set_keyboard_focus(&seat, nearest);
+      const auto direction = argument == "left" ? layout::FocusDirection::left :
+          argument == "right" ? layout::FocusDirection::right :
+          argument == "up" ? layout::FocusDirection::up : layout::FocusDirection::down;
+      const auto nearest = layout::nearest_in_direction(
+          {origin.first, origin.second}, centers, direction);
+      if (!nearest) return fail("no visible window in that direction");
+      set_keyboard_focus(&seat, directional[*nearest]);
       configure_layout(&impl_->observer);
       return true;
     }
@@ -3585,8 +3442,8 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
     if (output == nullptr) end_interactive(&impl_->seat_state);
     else {
       auto& viewport = output->canvas_viewports[output->active_tag - 1];
-      const auto dx = canvas_world_delta(x - impl_->seat_state.interactive_pointer_x, viewport);
-      const auto dy = canvas_world_delta(y - impl_->seat_state.interactive_pointer_y, viewport);
+      const auto dx = layout::canvas_world_delta(x - impl_->seat_state.interactive_pointer_x, viewport);
+      const auto dy = layout::canvas_world_delta(y - impl_->seat_state.interactive_pointer_y, viewport);
       viewport.x = impl_->seat_state.canvas_pan_start.x - dx;
       viewport.y = impl_->seat_state.canvas_pan_start.y - dy;
       configure_layout(&impl_->observer);
@@ -3603,8 +3460,8 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
       if (endless_canvas(&impl_->observer) && xdg->canvas_bounds.initialized) {
         const auto* viewport = canvas_viewport(&impl_->observer, xdg->output, xdg->tag);
         if (viewport == nullptr) return;
-        const auto world_dx = canvas_world_delta(dx, *viewport);
-        const auto world_dy = canvas_world_delta(dy, *viewport);
+        const auto world_dx = layout::canvas_world_delta(dx, *viewport);
+        const auto world_dy = layout::canvas_world_delta(dy, *viewport);
         const auto edge = impl_->seat_state.resize_edge;
         if (edge == protocol::XDG_TOPLEVEL_RESIZE_EDGE_NONE) {
           const auto snapped = snap_canvas_window(
@@ -3685,8 +3542,8 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
       const auto dy = y - impl_->seat_state.interactive_pointer_y;
       const auto* viewport = canvas_viewport(&impl_->observer, role->output, role->tag);
       if (viewport == nullptr) return;
-      const auto world_dx = canvas_world_delta(dx, *viewport);
-      const auto world_dy = canvas_world_delta(dy, *viewport);
+      const auto world_dx = layout::canvas_world_delta(dx, *viewport);
+      const auto world_dy = layout::canvas_world_delta(dy, *viewport);
       const auto edge = impl_->seat_state.resize_edge;
       if (edge == protocol::XDG_TOPLEVEL_RESIZE_EDGE_NONE) {
         const auto snapped = snap_canvas_window(
