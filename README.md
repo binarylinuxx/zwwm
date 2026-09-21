@@ -106,6 +106,7 @@ zwwmctl status
 zwwmctl outputs -j
 zwwmctl clients -j
 zwwmctl camera -j
+zwwmctl keyboard -j
 zwwmctl dispatch tag 2
 zwwmctl reload
 zwwmctl rebuild-switch-shaders

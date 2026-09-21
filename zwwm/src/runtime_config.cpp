@@ -191,6 +191,44 @@ bool parse_output_mode(std::string_view text, OutputMode& mode) {
   return true;
 }
 
+void parse_output_config(const lang::Value::Object& object, OutputConfig& output,
+                         lang::SourceLocation location,
+                         std::vector<lang::Diagnostic>& diagnostics,
+                         std::string_view prefix) {
+  const std::string field_prefix(prefix);
+  if (const auto* value = lang::find_field(object, "mode"); value != nullptr) {
+    const auto* text = lang::as_string(*value);
+    if (text == nullptr || !parse_output_mode(*text, output.mode))
+      error(diagnostics, location,
+            field_prefix + "mode must be \"preferred\" or WIDTHxHEIGHT@HZ");
+  }
+  if (const auto* value = lang::find_field(object, "scale-per-mille"); value != nullptr) {
+    const auto* scale = lang::as_integer(*value);
+    if (scale == nullptr || *scale < 250 || *scale > 8000)
+      error(diagnostics, location,
+            field_prefix + "scale-per-mille must be an integer from 250 to 8000");
+    else output.scale_per_mille = static_cast<std::uint32_t>(*scale);
+  }
+  if (const auto* value = lang::find_field(object, "bit-depth"); value != nullptr) {
+    const auto* depth = lang::as_integer(*value);
+    if (depth == nullptr || (*depth != 8 && *depth != 10))
+      error(diagnostics, location, field_prefix + "bit-depth must be 8 or 10");
+    else output.bit_depth = static_cast<std::uint32_t>(*depth);
+  }
+  if (const auto* value = lang::find_field(object, "transform"); value != nullptr) {
+    const auto* text = lang::as_string(*value);
+    if (text == nullptr)
+      error(diagnostics, location, field_prefix + "transform must be a string");
+    else if (*text == "normal") output.transform = OutputTransform::normal;
+    else if (*text == "90") output.transform = OutputTransform::rotate_90;
+    else if (*text == "180") output.transform = OutputTransform::rotate_180;
+    else if (*text == "270") output.transform = OutputTransform::rotate_270;
+    else
+      error(diagnostics, location,
+            field_prefix + "transform must be \"normal\", \"90\", \"180\", or \"270\"");
+  }
+}
+
 std::optional<KeyAction> key_action(std::string_view text) {
   if (text == "exec") return KeyAction::exec;
   if (text == "reload") return KeyAction::reload;
@@ -334,6 +372,22 @@ LayerEffect RuntimeConfig::layer_effect(std::string_view name_space) const {
     if (fnmatch(rule.name_space.c_str(), value.c_str(), 0) == 0) result = rule.effect;
   }
   return result;
+}
+
+const OutputConfig& RuntimeConfig::output_for(std::string_view connector) const {
+  auto configured = std::find_if(outputs.rbegin(), outputs.rend(), [&](const auto& candidate) {
+    return candidate.first == connector;
+  });
+  if (configured == outputs.rend()) {
+    const auto separator = connector.find('-');
+    if (separator != std::string_view::npos && connector.substr(0, separator).starts_with("card")) {
+      const auto short_name = connector.substr(separator + 1);
+      configured = std::find_if(outputs.rbegin(), outputs.rend(), [&](const auto& candidate) {
+        return candidate.first == short_name;
+      });
+    }
+  }
+  return configured == outputs.rend() ? output : configured->second;
 }
 
 bool RuntimeConfigResult::ok() const {
@@ -626,6 +680,13 @@ RuntimeConfigResult compile_runtime_config(const lang::Config& parsed) {
       }
       dimension(*object, "outer-gap", mutable_config->layout.outer_gap, item->location, result.diagnostics);
       dimension(*object, "inner-gap", mutable_config->layout.inner_gap, item->location, result.diagnostics);
+      dimension(*object, "min-zoom-per-mille", mutable_config->layout.min_zoom_per_mille,
+                item->location, result.diagnostics, true);
+      dimension(*object, "max-zoom-per-mille", mutable_config->layout.max_zoom_per_mille,
+                item->location, result.diagnostics, true);
+      if (mutable_config->layout.min_zoom_per_mille > mutable_config->layout.max_zoom_per_mille)
+        error(result.diagnostics, item->location,
+              "layout.min-zoom-per-mille must not exceed layout.max-zoom-per-mille");
       if (const auto* value = lang::find_field(*object, "smart-gaps"); value != nullptr) {
         const auto* smart = lang::as_boolean(*value);
         if (smart == nullptr) error(result.diagnostics, item->location, "layout.smart-gaps must be a boolean");
@@ -771,31 +832,29 @@ RuntimeConfigResult compile_runtime_config(const lang::Config& parsed) {
     if (object == nullptr) {
       error(result.diagnostics, item->location, "output must be an object");
     } else {
-      if (const auto* value = lang::find_field(*object, "mode"); value != nullptr) {
-        const auto* text = lang::as_string(*value);
-        if (text == nullptr || !parse_output_mode(*text, mutable_config->output.mode))
-          error(result.diagnostics, item->location, "output.mode must be \"preferred\" or WIDTHxHEIGHT@HZ");
-      }
-      if (const auto* value = lang::find_field(*object, "scale-per-mille"); value != nullptr) {
-        const auto* scale = lang::as_integer(*value);
-        if (scale == nullptr || *scale < 250 || *scale > 8000)
-          error(result.diagnostics, item->location, "output.scale-per-mille must be an integer from 250 to 8000");
-        else mutable_config->output.scale_per_mille = static_cast<std::uint32_t>(*scale);
-      }
-      if (const auto* value = lang::find_field(*object, "bit-depth"); value != nullptr) {
-        const auto* depth = lang::as_integer(*value);
-        if (depth == nullptr || (*depth != 8 && *depth != 10))
-          error(result.diagnostics, item->location, "output.bit-depth must be 8 or 10");
-        else mutable_config->output.bit_depth = static_cast<std::uint32_t>(*depth);
-      }
-      if (const auto* value = lang::find_field(*object, "transform"); value != nullptr) {
-        const auto* text = lang::as_string(*value);
-        if (text == nullptr) error(result.diagnostics, item->location, "output.transform must be a string");
-        else if (*text == "normal") mutable_config->output.transform = OutputTransform::normal;
-        else if (*text == "90") mutable_config->output.transform = OutputTransform::rotate_90;
-        else if (*text == "180") mutable_config->output.transform = OutputTransform::rotate_180;
-        else if (*text == "270") mutable_config->output.transform = OutputTransform::rotate_270;
-        else error(result.diagnostics, item->location, "output.transform must be \"normal\", \"90\", \"180\", or \"270\"");
+      parse_output_config(*object, mutable_config->output, item->location,
+                          result.diagnostics, "output.");
+    }
+  }
+
+  if (const auto* item = assignment(parsed, "outputs"); item != nullptr) {
+    const auto* object = lang::as_object(item->value);
+    if (object == nullptr) {
+      error(result.diagnostics, item->location, "outputs must be an object");
+    } else {
+      mutable_config->outputs.clear();
+      for (std::size_t index = 0; index < object->names.size(); ++index) {
+        const auto& connector = object->names[index];
+        const auto* definition = lang::as_object(object->values[index]);
+        if (definition == nullptr) {
+          error(result.diagnostics, item->location,
+                "outputs." + connector + " must be an object");
+          continue;
+        }
+        OutputConfig configured = mutable_config->output;
+        parse_output_config(*definition, configured, item->location, result.diagnostics,
+                            "outputs." + connector + ".");
+        mutable_config->outputs.emplace_back(connector, configured);
       }
     }
   }

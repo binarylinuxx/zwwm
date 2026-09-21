@@ -16,8 +16,6 @@ struct CanvasBounds {
 struct CanvasViewport {
   double x = 0.0, y = 0.0;
   double scale = 1.0;
-  double zoom_log_velocity = 0.0;
-  std::uint64_t last_zoom_tick_ms = 0;
 };
 
 struct CanvasRect {

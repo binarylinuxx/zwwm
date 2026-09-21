@@ -115,12 +115,15 @@ animations = {
 -- Endless canvas pans by left-dragging an empty background; Super+left/right
 -- moves/resizes windows in persistent world coordinates.
 -- master-ratio accepts 10..90.
+-- Canvas zoom is bounded by min/max-zoom-per-mille; 1000 means 1.0x.
 layout = {
   default = "master-stack"
   master-count = 1
   master-ratio = 60
   outer-gap = 16
   inner-gap = 12
+  min-zoom-per-mille = 250
+  max-zoom-per-mille = 1350
   smart-gaps = false
 }
 

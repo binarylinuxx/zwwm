@@ -402,12 +402,13 @@ void RuntimeBackend::set_config(std::shared_ptr<const RuntimeConfig> config) {
   for (auto& device : devices_) for (auto& output : device->outputs) {
     output->capture_ready = false;
     output->animations.set_config(config_->animations, now);
-    const auto logical = config_->output.logical_size({static_cast<std::uint32_t>(output->mode.hdisplay),
-                                                        static_cast<std::uint32_t>(output->mode.vdisplay)});
+    const auto& configured = config_->output_for(output->output.connector);
+    const auto logical = configured.logical_size({static_cast<std::uint32_t>(output->mode.hdisplay),
+                                                   static_cast<std::uint32_t>(output->mode.vdisplay)});
     output->output.logical_width = logical.width;
     output->output.logical_height = logical.height;
-    output->output.scale_per_mille = config_->output.scale_per_mille;
-    output->output.transform = config_->output.transform;
+    output->output.scale_per_mille = configured.scale_per_mille;
+    output->output.transform = configured.transform;
     output->output.refresh_millihz = mode_refresh_millihz(output->mode);
     repaint(*output);
   }
@@ -585,7 +586,8 @@ bool RuntimeBackend::capture_output(OutputCapture& capture, bool overlay_cursor)
                                      {static_cast<std::uint32_t>(selected->cursor_width),
                                       static_cast<std::uint32_t>(selected->cursor_height)}},
                                     1.0F, {1.0F, 1.0F, 1.0F, 1.0F}, selected->cursor_texture});
-      transform_frame(cursor_frame, config_->output, {capture.width, capture.height},
+      transform_frame(cursor_frame, config_->output_for(selected->output.connector),
+                      {capture.width, capture.height},
                       {selected->output.logical_x, selected->output.logical_y});
       glViewport(0, 0, selected->mode.hdisplay, selected->mode.vdisplay);
       if (!selected->device->renderer->render(cursor_frame, {capture.width, capture.height})) {
@@ -1111,14 +1113,21 @@ void RuntimeBackend::dispatch_libinput() {
         const double relative_dy = libinput_event_pointer_get_dy(pointer);
         const double relative_dx_unaccelerated = libinput_event_pointer_get_dx_unaccelerated(pointer);
         const double relative_dy_unaccelerated = libinput_event_pointer_get_dy_unaccelerated(pointer);
-        double dx = relative_dx * 1000.0 / config_->output.scale_per_mille;
-        double dy = relative_dy * 1000.0 / config_->output.scale_per_mille;
-        double dx_unaccelerated = relative_dx_unaccelerated * 1000.0 / config_->output.scale_per_mille;
-        double dy_unaccelerated = relative_dy_unaccelerated * 1000.0 / config_->output.scale_per_mille;
-        const auto transform_delta = [this](double& x, double& y) {
-          if (config_->output.transform == OutputTransform::rotate_90) { const double next = y; y = -x; x = next; }
-          else if (config_->output.transform == OutputTransform::rotate_180) { x = -x; y = -y; }
-          else if (config_->output.transform == OutputTransform::rotate_270) { const double next = -y; y = x; x = next; }
+        const OutputConfig* pointer_config = &config_->output;
+        for (const auto& device : devices_) for (const auto& output : device->outputs) {
+          if (cursor_x_ >= output->output.logical_x && cursor_y_ >= output->output.logical_y &&
+              cursor_x_ < output->output.logical_x + output->output.logical_width &&
+              cursor_y_ < output->output.logical_y + output->output.logical_height)
+            pointer_config = &config_->output_for(output->output.connector);
+        }
+        double dx = relative_dx * 1000.0 / pointer_config->scale_per_mille;
+        double dy = relative_dy * 1000.0 / pointer_config->scale_per_mille;
+        double dx_unaccelerated = relative_dx_unaccelerated * 1000.0 / pointer_config->scale_per_mille;
+        double dy_unaccelerated = relative_dy_unaccelerated * 1000.0 / pointer_config->scale_per_mille;
+        const auto transform_delta = [pointer_config](double& x, double& y) {
+          if (pointer_config->transform == OutputTransform::rotate_90) { const double next = y; y = -x; x = next; }
+          else if (pointer_config->transform == OutputTransform::rotate_180) { x = -x; y = -y; }
+          else if (pointer_config->transform == OutputTransform::rotate_270) { const double next = -y; y = x; x = next; }
         };
         transform_delta(dx, dy);
         transform_delta(dx_unaccelerated, dy_unaccelerated);
@@ -1230,6 +1239,7 @@ void RuntimeBackend::dispatch_drm(DrmDevice& device) {
 
 void RuntimeBackend::repaint(DrmOutput& card) {
   auto& device = *card.device;
+  const auto& output_config = config_->output_for(card.output.connector);
   if (card.flip_pending) { card.needs_repaint = true; return; }
   if (card.crtc_id == 0 || card.connector_id == 0 || card.scanout_surface == nullptr ||
       card.egl_surface == EGL_NO_SURFACE || device.renderer == nullptr) return;
@@ -1324,7 +1334,7 @@ void RuntimeBackend::repaint(DrmOutput& card) {
     const float inner_radius = config_->radius() * decoration_scale;
     const float outer_radius = inner_radius + border_width;
     const float border_join_width = border_width +
-        0.75F / (config_->output.scale_per_mille / 1000.0F);
+        0.75F / (output_config.scale_per_mille / 1000.0F);
     if (surface.toplevel && !root->fullscreen && border_width > 0.0F) {
       constexpr std::array<float, 4> border{1.0F, 1.0F, 1.0F, 1.0F};
       const auto animation = card.animations.sample(surface.id, now);
@@ -1411,8 +1421,8 @@ void RuntimeBackend::repaint(DrmOutput& card) {
   }
   const bool continue_animation = card.animations.active(now);
   const renderer::Point logical_origin{card.output.logical_x, card.output.logical_y};
-  transform_frame(frame, config_->output, physical, logical_origin);
-  transform_frame(cursor_frame, config_->output, physical, logical_origin);
+  transform_frame(frame, output_config, physical, logical_origin);
+  transform_frame(cursor_frame, output_config, physical, logical_origin);
   if (card.capture_texture == 0) glGenTextures(1, &card.capture_texture);
   glBindTexture(GL_TEXTURE_2D, card.capture_texture);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -1583,7 +1593,11 @@ void RuntimeBackend::add_drm_device(const char* path) {
     return true;
   };
   bool scanout_ready = false;
-  if (config_->output.bit_depth == 10) scanout_ready = choose_scanout(10, 0) || choose_scanout(10, 2);
+  const bool wants_ten_bit = config_->output.bit_depth == 10 ||
+      std::any_of(config_->outputs.begin(), config_->outputs.end(), [](const auto& configured) {
+        return configured.second.bit_depth == 10;
+      });
+  if (wants_ten_bit) scanout_ready = choose_scanout(10, 0) || choose_scanout(10, 2);
   if (!scanout_ready) scanout_ready = choose_scanout(8, 0) || choose_scanout(8, 8);
   if (!scanout_ready) {
     std::fprintf(stderr, "zwwm: DRM %s: no compatible EGL/GBM scanout format (error=0x%x)\n", path, eglGetError());
@@ -1654,8 +1668,9 @@ void RuntimeBackend::rescan_drm_device(DrmDevice& device) {
     const drmModeModeInfo* mode = &connector->modes[0];
     for (int index = 0; index < connector->count_modes; ++index)
       if ((connector->modes[index].type & DRM_MODE_TYPE_PREFERRED) != 0) { mode = &connector->modes[index]; break; }
-    if (!config_->output.mode.preferred) {
-      const auto requested = config_->output.mode;
+    const auto& configured = config_->output_for(candidate.name);
+    if (!configured.mode.preferred) {
+      const auto requested = configured.mode;
       const auto exact = std::find_if(connector->modes, connector->modes + connector->count_modes,
           [requested](const drmModeModeInfo& item) {
             const auto refresh = mode_refresh_millihz(item);
@@ -1672,7 +1687,7 @@ void RuntimeBackend::rescan_drm_device(DrmDevice& device) {
       if (connector->encoder_id == encoder->encoder_id) candidate.current_crtc = encoder->crtc_id;
       drmModeFreeEncoder(encoder);
     }
-    if (config_->output.bit_depth == 10) for (int index = 0; index < connector->count_props; ++index) {
+    if (configured.bit_depth == 10) for (int index = 0; index < connector->count_props; ++index) {
       drmModePropertyRes* property = drmModeGetProperty(device.fd, connector->props[index]);
       if (property != nullptr && std::strcmp(property->name, "max bpc") == 0 && property->count_values >= 2 && property->values[1] >= 10)
         (void)drmModeObjectSetProperty(device.fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, property->prop_id, 10);
@@ -1760,14 +1775,15 @@ void RuntimeBackend::rescan_drm_device(DrmDevice& device) {
     output->egl_surface = eglCreateWindowSurface(device.egl_display, device.egl_config,
         reinterpret_cast<EGLNativeWindowType>(output->scanout_surface), nullptr);
     if (output->egl_surface == EGL_NO_SURFACE) { gbm_surface_destroy(output->scanout_surface); continue; }
-    const auto logical = config_->output.logical_size({static_cast<std::uint32_t>(candidate.mode.hdisplay),
-                                                        static_cast<std::uint32_t>(candidate.mode.vdisplay)});
+    const auto& configured = config_->output_for(candidate.name);
+    const auto logical = configured.logical_size({static_cast<std::uint32_t>(candidate.mode.hdisplay),
+                                                   static_cast<std::uint32_t>(candidate.mode.vdisplay)});
     output->output = {.id = stable_output_id(device.path, candidate.key), .connector = candidate.name,
         .logical_width = logical.width, .logical_height = logical.height,
         .physical_width = static_cast<std::uint32_t>(candidate.mode.hdisplay),
         .physical_height = static_cast<std::uint32_t>(candidate.mode.vdisplay),
         .refresh_millihz = mode_refresh_millihz(candidate.mode),
-        .scale_per_mille = config_->output.scale_per_mille, .transform = config_->output.transform,
+        .scale_per_mille = configured.scale_per_mille, .transform = configured.transform,
         .bit_depth = device.scanout_bit_depth, .modes = std::move(candidate.modes)};
     next.push_back(std::move(output));
   }

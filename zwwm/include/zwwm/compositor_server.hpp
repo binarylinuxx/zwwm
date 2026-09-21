@@ -131,6 +131,11 @@ struct CameraInfo {
   bool active = false;
 };
 
+struct KeyboardLayoutInfo {
+  std::string name;
+  std::uint32_t group = 0;
+};
+
 class CompositorServer {
  public:
   using SurfaceCommitObserver = void (*)(void*, const ShmBufferView&);
@@ -179,6 +184,7 @@ class CompositorServer {
   [[nodiscard]] std::vector<TagInfo> tags() const;
   [[nodiscard]] std::vector<LayerInfo> layers() const;
   [[nodiscard]] std::vector<CameraInfo> cameras() const;
+  [[nodiscard]] KeyboardLayoutInfo keyboard_layout() const;
   // Executes a configured action name. Reload is owned by the caller.
   [[nodiscard]] bool dispatch_action(const std::string& action, const std::string& argument,
                                      std::string* error);

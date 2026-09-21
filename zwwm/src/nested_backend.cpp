@@ -40,6 +40,8 @@ namespace zwwm {
 namespace protocol = zwayland::generated;
 namespace client_core = zwayland::client::core;
 
+constexpr std::string_view kNestedConnector = "nested-1";
+
 struct NestedBackend::Window {
   std::uint64_t id = 0;
   std::uint64_t root_id = 0;
@@ -287,11 +289,12 @@ NestedBackend::NestedBackend(zwayland::server::EventLoop* event_loop,
                              std::shared_ptr<const RuntimeConfig> config)
     : event_loop_(event_loop), config_(std::move(config)), animations_(config_ == nullptr ? AnimationConfig{} : config_->animations) {
   if (config_ == nullptr) throw std::invalid_argument("runtime configuration is required");
-  if (!config_->output.mode.preferred) {
-    physical_width_ = config_->output.mode.width;
-    physical_height_ = config_->output.mode.height;
+  const auto& output_config = config_->output_for(kNestedConnector);
+  if (!output_config.mode.preferred) {
+    physical_width_ = output_config.mode.width;
+    physical_height_ = output_config.mode.height;
   }
-  const auto logical = config_->output.logical_size({physical_width_, physical_height_});
+  const auto logical = output_config.logical_size({physical_width_, physical_height_});
   logical_width_ = logical.width;
   logical_height_ = logical.height;
   if (const char* theme = std::getenv("XCURSOR_THEME"); theme != nullptr && *theme != '\0')
@@ -371,7 +374,7 @@ void NestedBackend::set_presentation_observer(PresentationObserver observer, voi
 void NestedBackend::set_config(std::shared_ptr<const RuntimeConfig> config) {
   if (config == nullptr) return;
   config_ = std::move(config);
-  const auto logical = config_->output.logical_size({physical_width_, physical_height_});
+  const auto logical = config_->output_for(kNestedConnector).logical_size({physical_width_, physical_height_});
   logical_width_ = logical.width;
   logical_height_ = logical.height;
   if (input_target_ != nullptr) input_target_->set_output_size(physical_width_, physical_height_);
@@ -493,7 +496,7 @@ bool NestedBackend::capture_output(OutputCapture& capture, bool overlay_cursor) 
     const auto& cursor = found->second;
     const int left = cursor.x - cursor.hotspot_x;
     const int top = cursor.y - cursor.hotspot_y;
-    const auto physical = config_->output.physical_bounds(
+    const auto physical = config_->output_for(kNestedConnector).physical_bounds(
         {{left, top}, {static_cast<std::uint32_t>(cursor.width), static_cast<std::uint32_t>(cursor.height)}},
         {physical_width_, physical_height_});
     const int x0 = std::clamp(physical.origin.x, 0, static_cast<int>(physical_width_));
@@ -501,7 +504,7 @@ bool NestedBackend::capture_output(OutputCapture& capture, bool overlay_cursor) 
     const int x1 = std::clamp(physical.origin.x + static_cast<int>(physical.size.width), x0, static_cast<int>(physical_width_));
     const int y1 = std::clamp(physical.origin.y + static_cast<int>(physical.size.height), y0, static_cast<int>(physical_height_));
     for (int y = y0; y < y1; ++y) for (int x = x0; x < x1; ++x) {
-      const auto logical = config_->output.physical_to_logical({x, y}, {physical_width_, physical_height_});
+      const auto logical = config_->output_for(kNestedConnector).physical_to_logical({x, y}, {physical_width_, physical_height_});
       const int sx = logical.x - left, sy = logical.y - top;
       if (sx >= 0 && sy >= 0 && sx < cursor.width && sy < cursor.height) {
         auto& destination = capture.pixels[static_cast<std::size_t>(y) * physical_width_ + x];
@@ -912,7 +915,7 @@ void NestedBackend::repaint_gpu() {
     const float inner_radius = config_->radius() * decoration_scale;
     const float outer_radius = inner_radius + border_width;
     const float border_join_width = border_width +
-        0.75F / (config_->output.scale_per_mille / 1000.0F);
+        0.75F / (config_->output_for(kNestedConnector).scale_per_mille / 1000.0F);
     if (window.toplevel && !root->fullscreen && border_width > 0.0F) {
       constexpr std::array<float, 4> border{1.0F, 1.0F, 1.0F, 1.0F};
       const auto animation = animations_.sample(window.id, now);
@@ -987,7 +990,7 @@ void NestedBackend::repaint_gpu() {
                            {{popup_x, 24}, {error_popup_.width, error_popup_.height}},
                            1.0F, {1.0F, 1.0F, 1.0F, 1.0F}, error_popup_texture_});
   }
-  transform_frame(frame, config_->output, {physical_width_, physical_height_});
+  transform_frame(frame, config_->output_for(kNestedConnector), {physical_width_, physical_height_});
   glViewport(0, 0, static_cast<int>(physical_width_), static_cast<int>(physical_height_));
   glClearColor(0.125F, 0.141F, 0.169F, 1.0F);
   glClear(GL_COLOR_BUFFER_BIT);
@@ -1191,7 +1194,7 @@ void NestedBackend::repaint() {
   auto* output = static_cast<std::uint32_t*>(buffer_data_);
   for (std::uint32_t y = 0; y < physical_height_; ++y) {
     for (std::uint32_t x = 0; x < physical_width_; ++x) {
-      auto logical = config_->output.physical_to_logical({static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)},
+      auto logical = config_->output_for(kNestedConnector).physical_to_logical({static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)},
                                                           {physical_width_, physical_height_});
       logical.x = std::clamp(logical.x, 0, static_cast<std::int32_t>(logical_width_) - 1);
       logical.y = std::clamp(logical.y, 0, static_cast<std::int32_t>(logical_height_) - 1);
@@ -1425,7 +1428,7 @@ void NestedBackend::KeyboardObserver::repeat_info(zwayland::client::Proxy&, std:
 }
 
 void NestedBackend::deliver_pointer_motion(std::uint32_t time, std::int32_t x, std::int32_t y) {
-  const auto logical_point = config_->output.physical_to_logical({x, y}, {physical_width_, physical_height_});
+  const auto logical_point = config_->output_for(kNestedConnector).physical_to_logical({x, y}, {physical_width_, physical_height_});
   const int px = std::clamp(logical_point.x, 0, static_cast<int>(logical_width_) - 1), py = std::clamp(logical_point.y, 0, static_cast<int>(logical_height_) - 1);
   auto& cursor = embedded_cursors[this];
   cursor.x = px;

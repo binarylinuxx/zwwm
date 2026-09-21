@@ -331,6 +331,8 @@ layout = {
   master-ratio = 60
   outer-gap = 16
   inner-gap = 12
+  min-zoom-per-mille = 250
+  max-zoom-per-mille = 1350
   smart-gaps = false
 }
 ```
@@ -343,6 +345,8 @@ layout = {
 | `outer-gap` | `16` | `0` or greater, pixels |
 | `inner-gap` | `12` | `0` or greater, pixels |
 | `gaps` | Not set | Fallback for both gap fields when their explicit fields are absent |
+| `min-zoom-per-mille` | `250` | Positive canvas zoom minimum; `1000` is 1.0x |
+| `max-zoom-per-mille` | `1350` | Positive canvas zoom maximum; must be at least the minimum |
 | `smart-gaps` | `false` | Removes outer gaps when only one tiled window is visible |
 
 `focus-fibonacci` is a persistent, focus-driven split layout. A newly tiled
@@ -366,6 +370,8 @@ the same output and tag. The resulting separation is `inner-gap`. The capture
 threshold is 16 output pixels and is converted to world coordinates, so snapping
 feels consistent at every zoom level. Snapped windows remain independent; moving
 one does not move its neighbors.
+
+To prevent zooming in beyond 1.0x, set `max-zoom-per-mille = 1000`.
 
 A new native toplevel first receives an unconstrained `0x0` configure. Its first
 committed positive `set_window_geometry` size becomes its canvas size; without
@@ -590,6 +596,8 @@ zwwmctl tags
 zwwmctl layers
 zwwmctl camera
 zwwmctl camera -j
+zwwmctl keyboard
+zwwmctl keyboard -j
 zwwmctl dispatch focus left
 zwwmctl rebuild-switch-shaders
 zwwmctl setcursor "Bibata-Modern-Classic" 24
@@ -598,7 +606,10 @@ zwwmctl setcursor "Bibata-Modern-Classic" 24
 `camera` reports one row per output for its active tag: connector, output ID,
 tag, world X, world Y, zoom level, and whether the output is active. JSON output
 returns these as named fields in a `cameras` array. Camera reporting requires
-manager protocol version 4, included since zwwm `0.1.1-alpha.1`.
+manager protocol version 4.
+
+`keyboard` reports the effective XKB layout name and zero-based group. It
+requires manager protocol version 5.
 
 Successful reloads update layout, rendering, input, keyboard state, logical
 output scale and transform, bindings, rules, animations, and environment

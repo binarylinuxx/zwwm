@@ -204,7 +204,6 @@ struct SeatState {
   bool tiled_resize = false;
   bool canvas_panning = false;
   bool canvas_zooming = false;
-  int canvas_zoom_timer = -1;
   std::uint32_t interactive_button = 0;
   OutputId interactive_output;
   std::uint64_t weight_before = 0, weight_after = 0;
@@ -236,6 +235,7 @@ struct DataDeviceState { SeatState* seat = nullptr; zwayland::server::Resource* 
 struct DataOfferState { SeatState* seat = nullptr; DataSourceState* source = nullptr; zwayland::server::Resource* resource = nullptr; DataProtocol protocol = DataProtocol::standard; std::uint32_t actions = 0; std::uint32_t preferred_action = 0; std::uint32_t action = 0; bool drag = false; bool active = false; bool dropped = false; bool accepted = false; };
 
 SurfaceState* root(SurfaceState* surface);
+const OutputConfig& output_config(const Observer* observer, OutputId output = {});
 void absolute_position(const SurfaceState* surface, std::int32_t* x, std::int32_t* y);
 void surface_local_from_global(const SurfaceState* surface, std::int32_t global_x, std::int32_t global_y,
                                std::int32_t* local_x, std::int32_t* local_y);

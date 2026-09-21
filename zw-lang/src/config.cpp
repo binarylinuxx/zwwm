@@ -503,6 +503,36 @@ ValidationResult validate_config(const Config& config, std::span<const Validatio
   }
 
   ValidationContext context(result.diagnostics);
+  const auto validate_output = [&](const Value::Object& object, SourceLocation location,
+                                   std::string_view prefix) {
+    if (const Value* value = lookup_field(object, "mode"); value != nullptr && !is_output_mode(*value))
+      validation_error(result.diagnostics, location,
+                       std::string(prefix) + "mode must be \"preferred\" or WIDTHxHEIGHT@HZ");
+    if (const Value* value = lookup_field(object, "scale-per-mille"); value != nullptr) {
+      const auto* scale = std::get_if<std::int64_t>(&value->data);
+      if (scale == nullptr || *scale < 250 || *scale > 8000)
+        validation_error(result.diagnostics, location,
+                         std::string(prefix) + "scale-per-mille must be an integer from 250 to 8000");
+    }
+    if (const Value* value = lookup_field(object, "bit-depth"); value != nullptr) {
+      const auto* depth = std::get_if<std::int64_t>(&value->data);
+      if (depth == nullptr || (*depth != 8 && *depth != 10))
+        validation_error(result.diagnostics, location,
+                         std::string(prefix) + "bit-depth must be 8 or 10");
+    }
+    if (const Value* value = lookup_field(object, "transform"); value != nullptr) {
+      const auto* transform = std::get_if<std::string>(&value->data);
+      if (transform == nullptr || (*transform != "normal" && *transform != "90" &&
+                                   *transform != "180" && *transform != "270"))
+        validation_error(result.diagnostics, location,
+                         std::string(prefix) +
+                             "transform must be \"normal\", \"90\", \"180\", or \"270\"");
+    }
+    constexpr std::array<std::string_view, 4> fields = {
+        "mode", "scale-per-mille", "bit-depth", "transform"};
+    warn_unknown_fields(object, fields, result.diagnostics, location,
+                        prefix.substr(0, prefix.size() - 1));
+  };
   for (const Assignment& assignment : config.assignments) {
     if (assignment.key != "import") {
       check_variables(assignment.value, variables, result.diagnostics, assignment.location);
@@ -580,7 +610,8 @@ ValidationResult validate_config(const Config& config, std::span<const Validatio
                            "layout.master-ratio must be an integer percent from 10 to 90");
         }
       }
-      for (const char* name : {"outer-gap", "inner-gap", "gaps"}) {
+      for (const char* name : {"outer-gap", "inner-gap", "gaps", "min-zoom-per-mille",
+                               "max-zoom-per-mille"}) {
         if (const Value* value = lookup_field(*object, name); value != nullptr && !is_nonnegative_integer(*value)) {
           validation_error(result.diagnostics, assignment.location,
                            std::string("layout.") + name + " must be a nonnegative integer");
@@ -589,8 +620,9 @@ ValidationResult validate_config(const Config& config, std::span<const Validatio
       if (const Value* value = lookup_field(*object, "smart-gaps"); value != nullptr && !is_bool(*value)) {
         validation_error(result.diagnostics, assignment.location, "layout.smart-gaps must be a boolean");
       }
-      constexpr std::array<std::string_view, 7> fields = {
-          "default", "master-count", "master-ratio", "outer-gap", "inner-gap", "gaps", "smart-gaps"};
+      constexpr std::array<std::string_view, 9> fields = {
+          "default", "master-count", "master-ratio", "outer-gap", "inner-gap", "gaps",
+          "min-zoom-per-mille", "max-zoom-per-mille", "smart-gaps"};
       warn_unknown_fields(*object, fields, result.diagnostics, assignment.location, "layout");
       continue;
     }
@@ -719,32 +751,25 @@ ValidationResult validate_config(const Config& config, std::span<const Validatio
         validation_error(result.diagnostics, assignment.location, "output must be an object");
         continue;
       }
-      if (const Value* value = lookup_field(*object, "mode"); value != nullptr && !is_output_mode(*value)) {
-        validation_error(result.diagnostics, assignment.location,
-                         "output.mode must be \"preferred\" or WIDTHxHEIGHT@HZ");
+      validate_output(*object, assignment.location, "output.");
+      continue;
+    }
+    if (assignment.key == "outputs") {
+      const auto* object = std::get_if<Value::Object>(&assignment.value.data);
+      if (object == nullptr) {
+        validation_error(result.diagnostics, assignment.location, "outputs must be an object");
+        continue;
       }
-      if (const Value* value = lookup_field(*object, "scale-per-mille"); value != nullptr) {
-        const auto* scale = std::get_if<std::int64_t>(&value->data);
-        if (scale == nullptr || *scale < 250 || *scale > 8000) {
+      for (std::size_t index = 0; index < object->names.size(); ++index) {
+        const auto* configured = std::get_if<Value::Object>(&object->values[index].data);
+        if (configured == nullptr) {
           validation_error(result.diagnostics, assignment.location,
-                           "output.scale-per-mille must be an integer from 250 to 8000");
+                           "outputs." + object->names[index] + " must be an object");
+          continue;
         }
+        validate_output(*configured, assignment.location,
+                        "outputs." + object->names[index] + ".");
       }
-      if (const Value* value = lookup_field(*object, "bit-depth"); value != nullptr) {
-        const auto* depth = std::get_if<std::int64_t>(&value->data);
-        if (depth == nullptr || (*depth != 8 && *depth != 10))
-          validation_error(result.diagnostics, assignment.location, "output.bit-depth must be 8 or 10");
-      }
-      if (const Value* value = lookup_field(*object, "transform"); value != nullptr) {
-        const auto* transform = std::get_if<std::string>(&value->data);
-        if (transform == nullptr || (*transform != "normal" && *transform != "90" &&
-                                     *transform != "180" && *transform != "270")) {
-          validation_error(result.diagnostics, assignment.location,
-                           "output.transform must be \"normal\", \"90\", \"180\", or \"270\"");
-        }
-      }
-      constexpr std::array<std::string_view, 4> output_fields = {"mode", "scale-per-mille", "bit-depth", "transform"};
-      warn_unknown_fields(*object, output_fields, result.diagnostics, assignment.location, "output");
       continue;
     }
     if (assignment.key == "environment") {

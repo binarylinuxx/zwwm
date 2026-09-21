@@ -86,6 +86,8 @@ struct LayoutConfig {
   std::uint32_t master_ratio_percent = 60;
   std::uint32_t outer_gap = 16;
   std::uint32_t inner_gap = 12;
+  std::uint32_t min_zoom_per_mille = 250;
+  std::uint32_t max_zoom_per_mille = 1350;
   bool smart_gaps = false;
 };
 
@@ -180,6 +182,7 @@ class RuntimeConfig {
   InputConfig input;
   KeyboardConfig keyboard;
   OutputConfig output;
+  std::vector<std::pair<std::string, OutputConfig>> outputs;
   AnimationConfig animations;
   std::vector<std::pair<std::string, std::string>> environment;
   std::vector<std::string> startup_commands;
@@ -195,6 +198,7 @@ class RuntimeConfig {
       const std::vector<layout::WindowId>& windows, renderer::Rect work_area) const;
   [[nodiscard]] renderer::Rect content_bounds(renderer::Rect placement) const;
   [[nodiscard]] LayerEffect layer_effect(std::string_view name_space) const;
+  [[nodiscard]] const OutputConfig& output_for(std::string_view connector) const;
 };
 
 struct RuntimeConfigResult {

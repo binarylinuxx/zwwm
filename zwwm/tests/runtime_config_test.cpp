@@ -58,6 +58,10 @@ int main() {
       cubic-bezier = { x1 = 100 y1 = 200 x2 = 700 y2 = 900 }
     }
     output = { mode = "2560x1440@143.95" scale-per-mille = 1250 transform = "90" }
+    outputs = {
+      HDMI-A-1 = { scale-per-mille = 1000 transform = "normal" }
+      DP-3 = {}
+    }
   )");
   assert(valid.ok());
   assert(valid.config->decoration.border_width == 7);
@@ -80,6 +84,10 @@ int main() {
   const auto physical_point = valid.config->output.logical_to_physical({100, 200}, {2560, 1440});
   const auto logical_point = valid.config->output.physical_to_logical(physical_point, {2560, 1440});
   assert(logical_point.x == 100 && logical_point.y == 200);
+  assert(valid.config->output_for("HDMI-A-1").scale_per_mille == 1000);
+  assert(valid.config->output_for("HDMI-A-1").transform == zwwm::OutputTransform::normal);
+  assert(valid.config->output_for("DP-3").scale_per_mille == 1250);
+  assert(valid.config->output_for("card0-HDMI-A-1").scale_per_mille == 1000);
 
   const auto key_only = compile(R"(bind = , Home, exec, "jes-cli screenpicker")");
   assert(key_only.ok());
@@ -99,6 +107,8 @@ int main() {
   assert(!compile("output = { mode = \"1920x1080\" }").ok());
   assert(!compile("output = { scale-per-mille = 200 }").ok());
   assert(!compile("output = { transform = \"flip\" }").ok());
+  assert(!compile("outputs = { HDMI-A-1 = { scale-per-mille = 0 } }").ok());
+  assert(!compile("layout = { min-zoom-per-mille = 1001 max-zoom-per-mille = 1000 }").ok());
 
   const auto shorthand = compile("layout = { gaps = 20 outer-gap = 3 }");
   assert(shorthand.ok());

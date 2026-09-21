@@ -2,7 +2,7 @@
 <protocol name="ext_zwwm_manager_v1">
   <copyright>Copyright 2026 zwwm contributors</copyright>
 
-  <interface name="ext_zwwm_manager_v1" version="4">
+  <interface name="ext_zwwm_manager_v1" version="5">
     <description summary="zwwm control and state manager">
       Provides typed compositor state snapshots, control actions, and event
       subscriptions to clients connected to the compositor Wayland socket.
@@ -15,6 +15,7 @@
       <entry name="tags" value="3"/>
       <entry name="layers" value="4"/>
       <entry name="cameras" value="5"/>
+      <entry name="keyboard" value="6"/>
     </enum>
 
     <enum name="event_mask" bitfield="true">
@@ -105,6 +106,10 @@
       <arg name="x" type="string"/><arg name="y" type="string"/>
       <arg name="zoom" type="string"/>
       <arg name="active" type="uint"/>
+    </event>
+    <event name="keyboard">
+      <arg name="layout" type="string"/>
+      <arg name="group" type="uint"/>
     </event>
     <event name="done"/>
     <event name="failed"><arg name="message" type="string"/></event>

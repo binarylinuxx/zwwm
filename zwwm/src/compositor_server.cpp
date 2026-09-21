@@ -243,6 +243,16 @@ OutputState* output_state(Observer* observer, OutputId id) {
                                   [id](const auto& output) { return output->info.id == id && !output->retired; });
   return found == observer->outputs->end() ? nullptr : found->get();
 }
+const OutputConfig& output_config(const Observer* observer, OutputId id) {
+  if (observer != nullptr && observer->config != nullptr && observer->outputs != nullptr) {
+    const auto output = std::find_if(observer->outputs->begin(), observer->outputs->end(), [id](const auto& item) {
+      return !id || item->info.id == id;
+    });
+    if (output != observer->outputs->end()) return observer->config->output_for((*output)->info.connector);
+  }
+  static const OutputConfig defaults;
+  return observer == nullptr || observer->config == nullptr ? defaults : observer->config->output;
+}
 OutputId surface_output(const SurfaceState* surface) {
   if (surface == nullptr) return {};
   if (surface->layer_surface != nullptr) return surface->layer_surface->output;
@@ -387,77 +397,24 @@ std::pair<std::int64_t, std::int64_t> snap_canvas_window(
   return layout::snap_canvas_window(x, y, width, height, candidates,
                                     observer->config->layout.inner_gap, viewport);
 }
-std::uint64_t monotonic_milliseconds() {
-  return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now().time_since_epoch()).count());
-}
-bool tick_canvas_zoom(Observer* observer, SeatState* seat) {
-  if (observer == nullptr || observer->outputs == nullptr || seat == nullptr) return false;
-  constexpr double smooth_rate = 12.5;
-  constexpr double velocity_epsilon = 0.02;
-  const auto now = monotonic_milliseconds();
-  bool changed = false;
-  bool active = false;
-  for (auto& output : *observer->outputs) {
-    const Rect work = output_work(observer, output->info.id);
-    for (auto& viewport : output->canvas_viewports) {
-      if (std::abs(viewport.zoom_log_velocity) <= velocity_epsilon) {
-        viewport.zoom_log_velocity = 0.0;
-        viewport.last_zoom_tick_ms = 0;
-        continue;
-      }
-      const double dt = viewport.last_zoom_tick_ms == 0 ? 1.0 / 60.0 :
-          std::clamp((now - std::min(now, viewport.last_zoom_tick_ms)) / 1000.0,
-                     1.0 / 240.0, 1.0 / 20.0);
-      viewport.last_zoom_tick_ms = now;
-      const double center_x = viewport.x + work.width / (2.0 * viewport.scale);
-      const double center_y = viewport.y + work.height / (2.0 * viewport.scale);
-      const double raw_scale = viewport.scale * std::exp(viewport.zoom_log_velocity * dt);
-      const double next_scale = std::clamp(raw_scale, 0.25, 1.35);
-      viewport.scale = next_scale;
-      viewport.x = center_x - work.width / (2.0 * next_scale);
-      viewport.y = center_y - work.height / (2.0 * next_scale);
-      viewport.zoom_log_velocity *= std::exp(-smooth_rate * dt);
-      if (next_scale != raw_scale || std::abs(viewport.zoom_log_velocity) <= velocity_epsilon)
-        viewport.zoom_log_velocity = 0.0;
-      active = active || viewport.zoom_log_velocity != 0.0;
-      changed = true;
-    }
-  }
-  if (changed) {
-    seat->canvas_zooming = true;
-    configure_layout(observer);
-    seat->canvas_zooming = false;
-  }
-  return active;
-}
 void zoom_canvas(Observer* observer, SeatState* seat, bool zoom_in) {
   if (observer == nullptr || seat == nullptr) return;
   auto* output = output_state(observer, observer->active_output);
   if (output == nullptr) return;
   auto& viewport = output->canvas_viewports[output->active_tag - 1];
-  constexpr double smooth_rate = 12.5;
-  constexpr double step_impulse = smooth_rate * 0.09531017980432486;  // ln(1.1)
-  constexpr double velocity_cap = step_impulse * 6.0;
-  viewport.zoom_log_velocity = std::clamp(
-      viewport.zoom_log_velocity + (zoom_in ? step_impulse : -step_impulse),
-      -velocity_cap, velocity_cap);
-  if (seat->display.display == nullptr) return;
-  auto& loop = seat->display.display->event_loop();
-  if (seat->canvas_zoom_timer < 0) {
-    seat->canvas_zoom_timer = loop.add_timer([observer, seat] {
-      if (tick_canvas_zoom(observer, seat)) {
-        seat->display.display->event_loop().update_timer(seat->canvas_zoom_timer, 8);
-      } else if (seat->cursor_override_shape == "zoom-in" ||
-                 seat->cursor_override_shape == "zoom-out") {
-        seat->cursor_override_shape.clear();
-        apply_cursor_shape(seat);
-      }
-    });
-  }
-  seat->cursor_override_shape = zoom_in ? "zoom-in" : "zoom-out";
-  apply_cursor_shape(seat);
-  loop.update_timer(seat->canvas_zoom_timer, 1);
+  const Rect work = output_work(observer, output->info.id);
+  const double center_x = viewport.x + work.width / (2.0 * viewport.scale);
+  const double center_y = viewport.y + work.height / (2.0 * viewport.scale);
+  const double minimum = observer->config->layout.min_zoom_per_mille / 1000.0;
+  const double maximum = observer->config->layout.max_zoom_per_mille / 1000.0;
+  const double scale = std::clamp(viewport.scale * (zoom_in ? 1.1 : 1.0 / 1.1), minimum, maximum);
+  if (scale == viewport.scale) return;
+  viewport.scale = scale;
+  viewport.x = center_x - work.width / (2.0 * scale);
+  viewport.y = center_y - work.height / (2.0 * scale);
+  seat->canvas_zooming = true;
+  configure_layout(observer);
+  seat->canvas_zooming = false;
 }
 Rect clamp_window(Rect rect, Rect area) {
   rect.width = std::clamp(rect.width, 1, std::max(1, area.width));
@@ -2137,6 +2094,7 @@ void end_interactive(SeatState* seat) {
   seat->interactive_button = 0;
   seat->interactive_output = {};
   seat->weight_before = seat->weight_after = 0;
+  configure_layout(seat->display.observer);
   if (restore_cursor) {
     seat->cursor_override_shape.clear();
     apply_cursor_shape(seat);
@@ -2586,7 +2544,7 @@ void bind_decoration_manager(zwayland::server::Client* client, void*, std::uint3
 }
 }  // namespace detail
 using namespace detail;
-struct CompositorServer::Impl { std::uint32_t compositor = 0, shm = 0, wm = 0, dialog_manager = 0, decoration_manager = 0, cursor_shape_manager = 0, pointer_constraints = 0, relative_pointer_manager = 0, seat = 0, sub = 0, dmabuf = 0, data_device_manager = 0, data_control_manager = 0, wlr_data_control_manager = 0, session_lock_manager = 0, tags_manager = 0; std::shared_ptr<const RuntimeConfig> config; Observer observer; TagsState tags; std::vector<SurfaceState*> surfaces; SeatState seat_state; DmabufState dmabuf_state; std::vector<std::unique_ptr<OutputState>> outputs; std::vector<std::unique_ptr<OutputState>> retired_outputs; OutputId active_output; ~Impl() { if (seat_state.canvas_zoom_timer >= 0 && seat_state.display.display != nullptr) seat_state.display.display->event_loop().remove(seat_state.canvas_zoom_timer); const auto release = [this](auto& list) { for (auto& state : list) { if (state->global != 0) seat_state.display.display->destroy_global(state->global); for (auto* resource : state->resources) resource->userdata.reset(); } }; release(outputs); release(retired_outputs); } };
+struct CompositorServer::Impl { std::uint32_t compositor = 0, shm = 0, wm = 0, dialog_manager = 0, decoration_manager = 0, cursor_shape_manager = 0, pointer_constraints = 0, relative_pointer_manager = 0, seat = 0, sub = 0, dmabuf = 0, data_device_manager = 0, data_control_manager = 0, wlr_data_control_manager = 0, session_lock_manager = 0, tags_manager = 0; std::shared_ptr<const RuntimeConfig> config; Observer observer; TagsState tags; std::vector<SurfaceState*> surfaces; SeatState seat_state; DmabufState dmabuf_state; std::vector<std::unique_ptr<OutputState>> outputs; std::vector<std::unique_ptr<OutputState>> retired_outputs; OutputId active_output; ~Impl() { const auto release = [this](auto& list) { for (auto& state : list) { if (state->global != 0) seat_state.display.display->destroy_global(state->global); for (auto* resource : state->resources) resource->userdata.reset(); } }; release(outputs); release(retired_outputs); } };
  CompositorServer::CompositorServer(zwayland::server::Display* d, std::shared_ptr<const RuntimeConfig> config) : impl_(new Impl) { impl_->config = std::move(config); if (impl_->config == nullptr) { delete impl_; impl_ = nullptr; throw std::invalid_argument("runtime configuration is required"); } impl_->observer.surfaces = &impl_->surfaces; impl_->observer.seat = &impl_->seat_state; impl_->observer.config = impl_->config.get(); impl_->observer.tags = &impl_->tags; impl_->seat_state.display.observer = &impl_->observer; impl_->seat_state.display = d; if (!initialize_xkb(&impl_->seat_state)) { release_xkb(&impl_->seat_state); delete impl_; impl_ = nullptr; throw std::runtime_error("could not initialize XKB for seat0"); } impl_->compositor = d->add_global(&protocol::wl_compositor_interface, kCompositorVersion, [data = &impl_->observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_comp)(&client, data, bound_version, id); }); impl_->shm = d->add_global(&protocol::wl_shm_interface, kShmVersion, [data = this](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_shm)(&client, data, bound_version, id); }); impl_->wm = d->add_global(&protocol::xdg_wm_base_interface, kXdgVersion, [data = this](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_wm)(&client, data, bound_version, id); }); impl_->tags_manager = d->add_global(&protocol::zwwm_tags_v1_interface, 1, [data = &impl_->observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_tags)(&client, data, bound_version, id); }); impl_->decoration_manager = d->add_global(&protocol::zxdg_decoration_manager_v1_interface, kDecorationVersion, [data = this](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_decoration_manager)(&client, data, bound_version, id); }); impl_->cursor_shape_manager = d->add_global(&protocol::wp_cursor_shape_manager_v1_interface, 1, [data = &impl_->observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_cursor_shape_manager)(&client, data, bound_version, id); }); impl_->pointer_constraints = d->add_global(&protocol::zwp_pointer_constraints_v1_interface, 1, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_pointer_constraints)(&client, data, bound_version, id); }); impl_->seat = d->add_global(&protocol::wl_seat_interface, kSeatVersion, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_seat)(&client, data, bound_version, id); }); impl_->sub = d->add_global(&protocol::wl_subcompositor_interface, kSubcompositorVersion, [data = this](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_sub)(&client, data, bound_version, id); }); impl_->data_device_manager = d->add_global(&protocol::wl_data_device_manager_interface, kDataDeviceManagerVersion, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_data_device_manager)(&client, data, bound_version, id); }); impl_->data_control_manager = d->add_global(&protocol::zwwm_data_control_manager_v1_interface, 1, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_data_control_manager)(&client, data, bound_version, id); }); impl_->wlr_data_control_manager = d->add_global(&protocol::zwlr_data_control_manager_v1_interface, 2, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_wlr_data_control_manager)(&client, data, bound_version, id); }); }
  CompositorServer::~CompositorServer() { while (!impl_->seat_state.constraints.empty()) impl_->seat_state.constraints.back()->resource->destroy(); while (!impl_->tags.clients.empty()) impl_->tags.clients.back()->resource->destroy(); while (!impl_->seat_state.data_offers.empty()) impl_->seat_state.data_offers.back()->resource->destroy(); while (!impl_->seat_state.data_control_devices.empty()) impl_->seat_state.data_control_devices.back()->resource->destroy(); while (!impl_->seat_state.data_devices.empty()) impl_->seat_state.data_devices.back()->resource->destroy(); while (!impl_->seat_state.data_sources.empty()) impl_->seat_state.data_sources.back()->resource->destroy(); for (std::uint32_t global : {impl_->dmabuf, impl_->wlr_data_control_manager, impl_->data_control_manager, impl_->data_device_manager, impl_->sub, impl_->seat, impl_->pointer_constraints, impl_->cursor_shape_manager, impl_->decoration_manager, impl_->tags_manager, impl_->dialog_manager, impl_->wm, impl_->shm, impl_->compositor}) if (global != 0) impl_->seat_state.display.display->destroy_global(global); release_xkb(&impl_->seat_state); delete impl_; }
  CompositorServer::CompositorServer(zwayland::server::Display* d, std::shared_ptr<const RuntimeConfig> config,
@@ -2616,11 +2574,12 @@ void CompositorServer::set_config(std::shared_ptr<const RuntimeConfig> config) {
   publish_keymap(&impl_->seat_state);
   auto outputs = this->outputs();
   for (auto& output : outputs) {
-    const auto logical = impl_->config->output.logical_size({output.physical_width, output.physical_height});
+    const auto& configured = impl_->config->output_for(output.connector);
+    const auto logical = configured.logical_size({output.physical_width, output.physical_height});
     output.logical_width = logical.width;
     output.logical_height = logical.height;
-    output.scale_per_mille = impl_->config->output.scale_per_mille;
-    output.transform = impl_->config->output.transform;
+    output.scale_per_mille = configured.scale_per_mille;
+    output.transform = configured.transform;
   }
   if (!outputs.empty()) set_outputs(std::move(outputs));
   for (auto* surface : impl_->surfaces) {
@@ -2632,8 +2591,9 @@ void CompositorServer::set_config(std::shared_ptr<const RuntimeConfig> config) {
       notify_surface_tree(surface);
     }
     if (surface->fractional_scale != nullptr)
-      protocol::wp_fractional_scale_v1_send_preferred_scale(*surface->fractional_scale->resource,
-                                                   impl_->config->output.fractional_scale_120());
+      protocol::wp_fractional_scale_v1_send_preferred_scale(
+          *surface->fractional_scale->resource,
+          output_config(&impl_->observer, surface_output(surface)).fractional_scale_120());
   }
   configure_layout(&impl_->observer);
   const auto reconfigure_popups = [&](const auto& self, SurfaceState* parent) -> void {
@@ -2648,12 +2608,13 @@ void CompositorServer::set_config(std::shared_ptr<const RuntimeConfig> config) {
 }
 void CompositorServer::set_output_size(std::uint32_t width, std::uint32_t height, std::uint32_t refresh_millihz) {
   if (width == 0 || height == 0 || width > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || height > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) return;
-  const auto logical = impl_->config->output.logical_size({width, height});
+  const auto& configured = impl_->config->output_for("nested-1");
+  const auto logical = configured.logical_size({width, height});
   set_outputs({OutputInfo{.id = OutputId{1}, .connector = "nested-1", .logical_width = logical.width,
                           .logical_height = logical.height, .physical_width = width,
                           .physical_height = height, .refresh_millihz = refresh_millihz,
-                          .scale_per_mille = impl_->config->output.scale_per_mille,
-                          .transform = impl_->config->output.transform, .modes = {}}});
+                           .scale_per_mille = configured.scale_per_mille,
+                           .transform = configured.transform, .modes = {}}});
 }
 
 void CompositorServer::set_outputs(std::vector<OutputInfo> outputs) {
@@ -2845,6 +2806,15 @@ std::optional<OutputInfo> CompositorServer::output_info(OutputId id) const {
   return found == impl_->outputs.end() ? std::nullopt : std::optional<OutputInfo>((*found)->info);
 }
 
+KeyboardLayoutInfo CompositorServer::keyboard_layout() const {
+  const auto* keymap = impl_->seat_state.xkb_keymap_handle;
+  const auto* state = impl_->seat_state.xkb_state_handle;
+  if (keymap == nullptr || state == nullptr) return {};
+  const auto group = xkb_state_serialize_layout(state, XKB_STATE_LAYOUT_EFFECTIVE);
+  const char* name = xkb_keymap_layout_get_name(keymap, group);
+  return {name == nullptr ? "" : name, group};
+}
+
 bool CompositorServer::copy_capture_buffer(zwayland::server::Resource* resource, const OutputCapture& capture,
                                             std::uint32_t source_x, std::uint32_t source_y,
                                             std::uint32_t width, std::uint32_t height) {
@@ -2867,7 +2837,8 @@ bool CompositorServer::map_capture_region(const OutputCapture& capture, std::int
   const auto bottom = static_cast<std::int32_t>(std::clamp<std::int64_t>(
       static_cast<std::int64_t>(y) + height, top, logical_height));
   if (right <= left || bottom <= top) return false;
-  const auto bounds = impl_->config->output.physical_bounds(
+  const auto& configured = info ? impl_->config->output_for(info->connector) : impl_->config->output;
+  const auto bounds = configured.physical_bounds(
       {{left, top}, {static_cast<std::uint32_t>(right - left), static_cast<std::uint32_t>(bottom - top)}},
       {capture.width, capture.height});
   const auto px = std::clamp(bounds.origin.x, 0, static_cast<std::int32_t>(capture.width));
@@ -2907,7 +2878,9 @@ std::vector<ToplevelInfo> CompositorServer::toplevels() const {
 #endif
     if (surface == nullptr || surface->parent != nullptr || !mapped) continue;
     const auto assigned_output = output_info(output);
-    const auto physical = impl_->config->output.physical_bounds(
+    const auto& configured = assigned_output ? impl_->config->output_for(assigned_output->connector) :
+                                               impl_->config->output;
+    const auto physical = configured.physical_bounds(
         {{bounds.x - (assigned_output ? assigned_output->logical_x : 0),
           bounds.y - (assigned_output ? assigned_output->logical_y : 0)},
          {static_cast<std::uint32_t>(std::max(0, bounds.width)),
@@ -3301,8 +3274,10 @@ SurfaceState* surface_at_global(const Observer* observer, std::int32_t x, std::i
   if (auto* hit = hit_layer(protocol::ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY); hit != nullptr) return hit;
   if (auto* hit = hit_layer(protocol::ZWLR_LAYER_SHELL_V1_LAYER_TOP); hit != nullptr) return hit;
   const auto hit_window = [&](int category) -> SurfaceState* {
-    for (auto it = surfaces.rbegin(); it != surfaces.rend(); ++it) {
-      auto* surface = *it; auto* xdg = surface->xdg_surface;
+    SurfaceState* result = nullptr;
+    std::uint64_t highest_order = 0;
+    for (auto* surface : surfaces) {
+      auto* xdg = surface->xdg_surface;
       bool mapped = xdg != nullptr && xdg->toplevel != nullptr && visible_xdg(observer, xdg);
       bool fullscreen = mapped && xdg->fullscreen;
       bool floating = mapped && xdg->floating && !fullscreen;
@@ -3315,11 +3290,15 @@ SurfaceState* surface_at_global(const Observer* observer, std::int32_t x, std::i
         floating = mapped && xwayland->floating && !fullscreen;
       }
 #endif
-      if (surface->parent != nullptr || !mapped || (category == 2) != fullscreen ||
-          (category == 1) != floating || (category == 0) != (!floating && !fullscreen)) continue;
-      if (auto* hit = surface_tree_at(surface, x, y); hit != nullptr) return hit;
+       if (surface->parent != nullptr || !mapped || (category == 2) != fullscreen ||
+           (category == 1) != floating || (category == 0) != (!floating && !fullscreen)) continue;
+      if (surface->root_order < highest_order) continue;
+      if (auto* hit = surface_tree_at(surface, x, y); hit != nullptr) {
+        result = hit;
+        highest_order = surface->root_order;
+      }
     }
-    return nullptr;
+    return result;
   };
   if (auto* hit = hit_window(2); hit != nullptr) return hit;
   if (auto* hit = hit_window(1); hit != nullptr) return hit;

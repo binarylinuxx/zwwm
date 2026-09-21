@@ -131,7 +131,7 @@ void get_fractional_scale(zwayland::server::Client* client, zwayland::server::Re
   resource->set_data(fractional); resource->set_handler(protocol::wp_fractional_scale_v1_handler(WpFractionalScaleV1KFractionalScaleHandler{})); resource->set_destroy_handler([](zwayland::server::Resource& destroyed) { (fractional_scale_destroyed)(&destroyed); });
   const auto* observer = surface->observer;
   protocol::wp_fractional_scale_v1_send_preferred_scale(*resource, observer == nullptr || observer->config == nullptr
-                                                            ? 120 : observer->config->output.fractional_scale_120());
+                                                            ? 120 : output_config(observer, surface_output(surface)).fractional_scale_120());
 }
 
 struct WpFractionalScaleManagerV1KFractionalScaleManagerHandler {

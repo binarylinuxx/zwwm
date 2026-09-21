@@ -84,21 +84,33 @@ void publish_keymap(SeatState* seat) {
 }
 
 bool binding_modifiers_match(const Keybinding& binding, const SeatState& seat) {
-  if (seat.xkb_state_handle == nullptr) return false;
+  if (seat.xkb_state_handle == nullptr || seat.xkb_keymap_handle == nullptr) return false;
+  xkb_mod_mask_t required = 0;
   std::size_t begin = 0;
   while (begin <= binding.modifiers.size()) {
     const auto end = binding.modifiers.find('+', begin);
     const auto name = binding.modifiers.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
-    if (!name.empty() && xkb_state_mod_name_is_active(seat.xkb_state_handle, name.c_str(), XKB_STATE_MODS_EFFECTIVE) == 0) return false;
+    if (!name.empty()) {
+      const auto index = xkb_keymap_mod_get_index(seat.xkb_keymap_handle, name.c_str());
+      if (index == XKB_MOD_INVALID || index >= sizeof(required) * 8U) return false;
+      required |= static_cast<xkb_mod_mask_t>(1) << index;
+    }
     if (end == std::string::npos) break;
     begin = end + 1;
   }
-  return true;
+  const auto active = xkb_state_serialize_mods(seat.xkb_state_handle, XKB_STATE_MODS_DEPRESSED) |
+                      xkb_state_serialize_mods(seat.xkb_state_handle, XKB_STATE_MODS_LATCHED);
+  return active == required;
 }
 bool binding_matches(const Keybinding& binding, const SeatState& seat, std::uint32_t key) {
   if (!binding_modifiers_match(binding, seat)) return false;
-  const auto keysym = xkb_state_key_get_one_sym(seat.xkb_state_handle, static_cast<xkb_keycode_t>(key + 8));
-  return keysym == xkb_keysym_from_name(binding.key.c_str(), XKB_KEYSYM_CASE_INSENSITIVE);
+  if (seat.xkb_keymap_handle == nullptr || key > std::numeric_limits<xkb_keycode_t>::max() - 8) return false;
+  const auto expected = xkb_keysym_from_name(binding.key.c_str(), XKB_KEYSYM_CASE_INSENSITIVE);
+  if (expected == XKB_KEY_NoSymbol) return false;
+  const xkb_keysym_t* symbols = nullptr;
+  const auto count = xkb_keymap_key_get_syms_by_level(
+      seat.xkb_keymap_handle, static_cast<xkb_keycode_t>(key + 8), 0, 0, &symbols);
+  return std::find(symbols, symbols + count, expected) != symbols + count;
 }
 
 bool execute_binding(const Keybinding& binding) {
