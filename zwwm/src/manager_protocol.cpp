@@ -41,6 +41,7 @@ struct ManagerProtocol::Impl {
   CompositorServer* compositor = nullptr;
   Reload reload;
   RebuildShaders rebuild_shaders;
+  SetCursor set_cursor;
   std::uint32_t global = 0;
   std::vector<Subscription*> subscriptions;
 
@@ -151,6 +152,20 @@ struct ManagerProtocol::Impl {
     else protocol::ext_zwwm_result_v1_send_failed(*resource, error.c_str());
   }
 
+  static void set_cursor_request(zwayland::server::Client* client,
+                                 zwayland::server::Resource* manager,
+                                 std::uint32_t id, const char* theme,
+                                 std::uint32_t size) {
+    auto* self = manager->data<Impl>();
+    auto* resource = self->result(client, id);
+    if (resource == nullptr) return;
+    const std::string error = self->set_cursor
+        ? self->set_cursor(theme == nullptr ? "" : theme, size)
+        : "cursor control is unavailable";
+    if (error.empty()) protocol::ext_zwwm_result_v1_send_succeeded(*resource, "cursor theme set");
+    else protocol::ext_zwwm_result_v1_send_failed(*resource, error.c_str());
+  }
+
   static void subscribe_request(zwayland::server::Client* client, zwayland::server::Resource* manager, std::uint32_t id,
                                 std::uint32_t events) {
     auto* self = manager->data<Impl>();
@@ -186,6 +201,11 @@ struct ManagerProtocol::Impl {
                                 std::uint32_t id) {
       rebuild_shaders_request(&client, &resource, id);
     }
+    void set_cursor(zwayland::server::Client& client,
+                    zwayland::server::Resource& resource, std::uint32_t id,
+                    const std::string& theme, std::uint32_t size) {
+      set_cursor_request(&client, &resource, id, theme.c_str(), size);
+    }
     void subscribe(zwayland::server::Client& client, zwayland::server::Resource& resource,
                    std::uint32_t id, std::uint32_t events) {
       subscribe_request(&client, &resource, id, events);
@@ -193,7 +213,7 @@ struct ManagerProtocol::Impl {
   };
   static void bind(zwayland::server::Client* client, void* data, std::uint32_t version, std::uint32_t id) {
     auto* self = static_cast<Impl*>(data);
-    auto* resource = client->create_resource(&protocol::ext_zwwm_manager_v1_interface, id, std::min(version, 2U));
+    auto* resource = client->create_resource(&protocol::ext_zwwm_manager_v1_interface, id, std::min(version, 3U));
     if (resource == nullptr) { client->post_no_memory(); return; }
     resource->set_data(self);
     resource->set_handler(protocol::ext_zwwm_manager_v1_handler(ManagerHandler{}));
@@ -201,14 +221,15 @@ struct ManagerProtocol::Impl {
 };
 
 ManagerProtocol::ManagerProtocol(zwayland::server::Display* display, CompositorServer* compositor, Reload reload,
-                                 RebuildShaders rebuild_shaders)
+                                  RebuildShaders rebuild_shaders, SetCursor set_cursor)
     : impl_(new Impl) {
   if (display == nullptr || compositor == nullptr) throw std::invalid_argument("manager protocol requires a display and compositor");
   impl_->display = display;
   impl_->compositor = compositor;
   impl_->reload = std::move(reload);
   impl_->rebuild_shaders = std::move(rebuild_shaders);
-  impl_->global = display->add_global(&protocol::ext_zwwm_manager_v1_interface, 2, [data = impl_](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (Impl::bind)(&client, data, bound_version, id); });
+  impl_->set_cursor = std::move(set_cursor);
+  impl_->global = display->add_global(&protocol::ext_zwwm_manager_v1_interface, 3, [data = impl_](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (Impl::bind)(&client, data, bound_version, id); });
   if (impl_->global == 0) { delete impl_; throw std::runtime_error("could not create manager protocol global"); }
   compositor->set_event_observer([](void* data, const char* event) {
     if (event != nullptr) static_cast<ManagerProtocol*>(data)->emit(event);

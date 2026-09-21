@@ -2,7 +2,7 @@
 <protocol name="ext_zwwm_manager_v1">
   <copyright>Copyright 2026 zwwm contributors</copyright>
 
-  <interface name="ext_zwwm_manager_v1" version="2">
+  <interface name="ext_zwwm_manager_v1" version="3">
     <description summary="zwwm control and state manager">
       Provides typed compositor state snapshots, control actions, and event
       subscriptions to clients connected to the compositor Wayland socket.
@@ -45,6 +45,11 @@
     <request name="subscribe">
       <arg name="id" type="new_id" interface="ext_zwwm_subscription_v1"/>
       <arg name="events" type="uint" enum="event_mask"/>
+    </request>
+    <request name="set_cursor" since="3">
+      <arg name="id" type="new_id" interface="ext_zwwm_result_v1"/>
+      <arg name="theme" type="string"/>
+      <arg name="size" type="uint"/>
     </request>
   </interface>
 

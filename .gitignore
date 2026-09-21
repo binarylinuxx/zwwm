@@ -3,6 +3,8 @@
 /build-*/
 /**/build/
 /**/build-*/
+!/build-aux/
+!/build-aux/**
 
 # CMake and Ninja artifacts from accidental in-source builds
 **/CMakeFiles/
@@ -28,8 +30,8 @@
 *.err
 *.pid
 *.sock
-core
-core.*
+/core
+/core.*
 
 # Editor and operating-system metadata
 .DS_Store

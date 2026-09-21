@@ -43,7 +43,6 @@ stdenv.mkDerivation {
       ../LICENSE
       ../THIRD_PARTY.md
       ../zwwm-session
-      ../build-aux
       ../xdg-desktop-portal-zwwm
       ../zw-lang
       ../zwayland-scanner

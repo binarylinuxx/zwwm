@@ -38,6 +38,8 @@ class RuntimeBackend {
   void set_input_target(CompositorServer* compositor);
   void set_dmabuf_target(CompositorServer* compositor);
   void set_cursor_shape(const char* xcursor_name);
+  [[nodiscard]] bool set_cursor_theme(const std::string& theme, std::uint32_t size,
+                                      std::string* error);
   void set_cursor_position(std::int32_t x, std::int32_t y);
   void show_error(std::string message);
   void clear_error();
@@ -104,6 +106,9 @@ class RuntimeBackend {
   double cursor_x_ = 480.0;
   double cursor_y_ = 270.0;
   bool cursor_visible_ = true;
+  std::string cursor_theme_ = "default";
+  std::string cursor_shape_ = "left_ptr";
+  std::uint32_t cursor_size_ = 24;
   std::uint32_t output_width_ = 960;
   std::uint32_t output_height_ = 540;
   std::uint32_t physical_output_width_ = 960;

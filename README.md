@@ -108,6 +108,7 @@ zwwmctl clients -j
 zwwmctl dispatch tag 2
 zwwmctl reload
 zwwmctl rebuild-switch-shaders
+zwwmctl setcursor "Bibata-Modern-Classic" 24
 ```
 
 See `CONFIG.md` for user shader paths, the atomic rebuild behavior, and the

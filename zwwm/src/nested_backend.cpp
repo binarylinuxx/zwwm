@@ -360,6 +360,10 @@ NestedBackend::NestedBackend(zwayland::server::EventLoop* event_loop,
   const auto logical = config_->output.logical_size({physical_width_, physical_height_});
   logical_width_ = logical.width;
   logical_height_ = logical.height;
+  if (const char* theme = std::getenv("XCURSOR_THEME"); theme != nullptr && *theme != '\0')
+    cursor_theme_ = theme;
+  if (const char* size = std::getenv("XCURSOR_SIZE"); size != nullptr)
+    cursor_size_ = static_cast<std::uint32_t>(std::max(1, std::atoi(size)));
 }
 NestedBackend::~NestedBackend() { stop(); }
 
@@ -500,10 +504,8 @@ void NestedBackend::set_cursor_shape(const char* xcursor_name) {
     return;
   }
   embedded.visible = true;
-  const char* theme = std::getenv("XCURSOR_THEME");
-  const char* size_text = std::getenv("XCURSOR_SIZE");
-  const int size = size_text == nullptr ? 24 : std::max(1, std::atoi(size_text));
-  XcursorImages* cursor = XcursorLibraryLoadImages(xcursor_name, theme == nullptr ? "default" : theme, size);
+  cursor_shape_ = xcursor_name;
+  XcursorImages* cursor = XcursorLibraryLoadImages(xcursor_name, cursor_theme_.c_str(), cursor_size_);
   if (cursor == nullptr || cursor->nimage == 0 || cursor->images[0] == nullptr) {
     if (cursor != nullptr) XcursorImagesDestroy(cursor);
     return;
@@ -515,6 +517,28 @@ void NestedBackend::set_cursor_shape(const char* xcursor_name) {
   embedded.hotspot_y = static_cast<std::int32_t>(image->yhot);
   embedded.pixels.assign(image->pixels, image->pixels + static_cast<std::size_t>(image->width) * image->height);
   XcursorImagesDestroy(cursor);
+}
+bool NestedBackend::set_cursor_theme(const std::string& theme, std::uint32_t size,
+                                     std::string* error) {
+  if (theme.empty()) {
+    if (error != nullptr) *error = "cursor theme must not be empty";
+    return false;
+  }
+  if (size == 0 || size > 1024) {
+    if (error != nullptr) *error = "cursor size must be between 1 and 1024";
+    return false;
+  }
+  XcursorImages* cursor = XcursorLibraryLoadImages(cursor_shape_.c_str(), theme.c_str(), size);
+  if (cursor == nullptr || cursor->nimage == 0 || cursor->images[0] == nullptr) {
+    if (cursor != nullptr) XcursorImagesDestroy(cursor);
+    if (error != nullptr) *error = "could not load cursor theme '" + theme + "'";
+    return false;
+  }
+  XcursorImagesDestroy(cursor);
+  cursor_theme_ = theme;
+  cursor_size_ = size;
+  if (embedded_cursors[this].visible) set_cursor_shape(cursor_shape_.c_str());
+  return true;
 }
 void NestedBackend::set_cursor_position(std::int32_t x, std::int32_t y) {
   auto& cursor = embedded_cursors[this];

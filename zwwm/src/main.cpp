@@ -119,6 +119,12 @@ int main(int argc, char** argv) {
       else nested->set_config(std::move(config));
       return rebuild_switch_shaders();
     }
+    std::string set_cursor(const std::string& theme, std::uint32_t size) {
+      std::string error;
+      const bool applied = runtime != nullptr ? runtime->set_cursor_theme(theme, size, &error)
+                                              : nested->set_cursor_theme(theme, size, &error);
+      return applied ? std::string{} : error;
+    }
   } config_targets{&compositor_server, &nested_backend};
   std::unique_ptr<zwwm::ConfigReloader> config_reloader;
   if (!loaded.path.empty()) {
@@ -158,7 +164,10 @@ int main(int argc, char** argv) {
           config_targets.clear_error();
           loaded.config = std::move(next.config);
           return {};
-        }, [&config_targets]() { return config_targets.rebuild_switch_shaders(); });
+        }, [&config_targets]() { return config_targets.rebuild_switch_shaders(); },
+        [&config_targets](const std::string& theme, std::uint32_t size) {
+          return config_targets.set_cursor(theme, size);
+        });
   } catch (const std::exception& exception) {
     std::fprintf(stderr, "zwwm: manager protocol initialization failed: %s\n", exception.what());
     return EXIT_FAILURE;

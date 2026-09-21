@@ -342,7 +342,12 @@ struct RuntimeBackend::DrmDevice {
 };
 
 RuntimeBackend::RuntimeBackend(zwayland::server::EventLoop* event_loop, std::shared_ptr<const RuntimeConfig> config)
-    : event_loop_(event_loop), config_(std::move(config)) {}
+    : event_loop_(event_loop), config_(std::move(config)) {
+  if (const char* theme = std::getenv("XCURSOR_THEME"); theme != nullptr && *theme != '\0')
+    cursor_theme_ = theme;
+  if (const char* size = std::getenv("XCURSOR_SIZE"); size != nullptr)
+    cursor_size_ = static_cast<std::uint32_t>(std::max(1, std::atoi(size)));
+}
 RuntimeBackend::~RuntimeBackend() { stop(); }
 
 bool RuntimeBackend::start() {
@@ -541,13 +546,11 @@ void RuntimeBackend::set_cursor_shape(const char* xcursor_name) {
     return;
   }
   cursor_visible_ = true;
-  const char* theme = std::getenv("XCURSOR_THEME");
-  const char* size_text = std::getenv("XCURSOR_SIZE");
-  const int size = size_text == nullptr ? 24 : std::max(1, std::atoi(size_text));
+  cursor_shape_ = xcursor_name;
   for (auto& device : devices_) for (auto& output : device->outputs) {
     if (output->egl_surface == EGL_NO_SURFACE ||
         eglMakeCurrent(device->egl_display, output->egl_surface, output->egl_surface, device->egl_context) != EGL_TRUE) continue;
-    XcursorImages* cursor = XcursorLibraryLoadImages(xcursor_name, theme == nullptr ? "default" : theme, size);
+    XcursorImages* cursor = XcursorLibraryLoadImages(xcursor_name, cursor_theme_.c_str(), cursor_size_);
     if (cursor == nullptr || cursor->nimage == 0 || cursor->images[0] == nullptr) {
       if (cursor != nullptr) XcursorImagesDestroy(cursor);
       continue;
@@ -567,6 +570,28 @@ void RuntimeBackend::set_cursor_shape(const char* xcursor_name) {
     XcursorImagesDestroy(cursor);
     repaint(*output);
   }
+}
+bool RuntimeBackend::set_cursor_theme(const std::string& theme, std::uint32_t size,
+                                      std::string* error) {
+  if (theme.empty()) {
+    if (error != nullptr) *error = "cursor theme must not be empty";
+    return false;
+  }
+  if (size == 0 || size > 1024) {
+    if (error != nullptr) *error = "cursor size must be between 1 and 1024";
+    return false;
+  }
+  XcursorImages* cursor = XcursorLibraryLoadImages(cursor_shape_.c_str(), theme.c_str(), size);
+  if (cursor == nullptr || cursor->nimage == 0 || cursor->images[0] == nullptr) {
+    if (cursor != nullptr) XcursorImagesDestroy(cursor);
+    if (error != nullptr) *error = "could not load cursor theme '" + theme + "'";
+    return false;
+  }
+  XcursorImagesDestroy(cursor);
+  cursor_theme_ = theme;
+  cursor_size_ = size;
+  if (cursor_visible_) set_cursor_shape(cursor_shape_.c_str());
+  return true;
 }
 void RuntimeBackend::set_cursor_position(std::int32_t x, std::int32_t y) {
   cursor_x_ = x;
@@ -1849,10 +1874,7 @@ void RuntimeBackend::rescan_drm_device(DrmDevice& device) {
         last_error_ = shader_error.empty() ? device.renderer->last_error() : shader_error;
     }
   }
-  const char* theme = std::getenv("XCURSOR_THEME");
-  const char* size_text = std::getenv("XCURSOR_SIZE");
-  const int size = size_text == nullptr ? 24 : std::max(1, std::atoi(size_text));
-  XcursorImages* cursor = XcursorLibraryLoadImages("left_ptr", theme == nullptr ? "default" : theme, size);
+  XcursorImages* cursor = XcursorLibraryLoadImages(cursor_shape_.c_str(), cursor_theme_.c_str(), cursor_size_);
   for (auto& output : device.outputs) if (output->cursor_texture == 0 && cursor != nullptr && cursor->nimage > 0 && cursor->images[0] != nullptr &&
       eglMakeCurrent(device.egl_display, output->egl_surface, output->egl_surface, device.egl_context) == EGL_TRUE) {
     const auto* image = cursor->images[0];

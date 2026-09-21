@@ -241,7 +241,7 @@ struct RegistryHandler {
     if (interface == protocol::ext_zwwm_manager_v1_interface.name)
       client->manager = zwayland::client::core::bind(
           *client->display, registry, name, protocol::ext_zwwm_manager_v1_interface,
-          std::min(version, 2U));
+      std::min(version, 3U));
   }
   void global_remove(zwayland::client::Proxy&, std::uint32_t) {}
 };
@@ -261,7 +261,7 @@ std::string line(const Client& client) {
 }
 
 void usage(const char* program) {
-  std::fprintf(stderr, "usage: %s {version|ping|status|output|outputs|clients|tags|layers|reload|rebuild-switch-shaders|dispatch ACTION [ARG]|events [EVENT ...]} [-j|--json]\n", program);
+  std::fprintf(stderr, "usage: %s {version|ping|status|output|outputs|clients|tags|layers|reload|rebuild-switch-shaders|setcursor THEME SIZE|dispatch ACTION [ARG]|events [EVENT ...]} [-j|--json]\n", program);
 }
 
 std::uint32_t event_mask(const std::vector<std::string>& events) {
@@ -336,6 +336,18 @@ int main(int argc, char** argv) {
     protocol::ext_zwwm_result_v1_observe(*client.display, ResultHandler{&client});
     const std::uint32_t result_id = protocol::ext_zwwm_manager_v1_rebuild_switch_shaders(
         *client.display, client.manager->id);
+    client.result = client.display->find_proxy(result_id);
+  } else if (command == "setcursor") {
+    if (arguments.size() != 2) { usage(argv[0]); return EXIT_FAILURE; }
+    char* end = nullptr;
+    const unsigned long parsed_size = std::strtoul(arguments[1].c_str(), &end, 10);
+    if (end == arguments[1].c_str() || *end != '\0' || parsed_size == 0 || parsed_size > 1024) {
+      std::fputs("zwwmctl: cursor size must be between 1 and 1024\n", stderr);
+      return EXIT_FAILURE;
+    }
+    protocol::ext_zwwm_result_v1_observe(*client.display, ResultHandler{&client});
+    const std::uint32_t result_id = protocol::ext_zwwm_manager_v1_set_cursor(
+        *client.display, client.manager->id, arguments[0], static_cast<std::uint32_t>(parsed_size));
     client.result = client.display->find_proxy(result_id);
   } else if (command == "dispatch") {
     if (arguments.empty() || arguments.size() > 2) { usage(argv[0]); return EXIT_FAILURE; }

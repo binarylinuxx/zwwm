@@ -45,6 +45,8 @@ class NestedBackend {
   void set_dmabuf_target(CompositorServer* compositor);
   // The parent compositor renders the nested cursor.
   void set_cursor_shape(const char* xcursor_name);
+  [[nodiscard]] bool set_cursor_theme(const std::string& theme, std::uint32_t size,
+                                      std::string* error);
   void set_cursor_position(std::int32_t x, std::int32_t y);
   void show_error(std::string message);
   void clear_error();
@@ -112,6 +114,9 @@ class NestedBackend {
   struct Window;
   std::vector<Window> windows_;
   std::string last_error_;
+  std::string cursor_theme_ = "default";
+  std::string cursor_shape_ = "left_ptr";
+  std::uint32_t cursor_size_ = 24;
   std::unique_ptr<zwwm::egl::Window> egl_window_;
   zwayland::client::Proxy* frame_callback_ = nullptr;
   std::unique_ptr<class renderer_holder> renderer_;

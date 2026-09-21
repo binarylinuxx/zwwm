@@ -2,6 +2,7 @@
 
 
 #include <zwayland/server/display.hpp>
+#include <cstdint>
 #include <functional>
 #include <string>
 namespace zwwm {
@@ -12,9 +13,10 @@ class ManagerProtocol {
  public:
   using Reload = std::function<std::string()>;
   using RebuildShaders = std::function<std::string()>;
+  using SetCursor = std::function<std::string(const std::string&, std::uint32_t)>;
 
   ManagerProtocol(zwayland::server::Display* display, CompositorServer* compositor, Reload reload,
-                  RebuildShaders rebuild_shaders);
+                   RebuildShaders rebuild_shaders, SetCursor set_cursor);
   ~ManagerProtocol();
 
   ManagerProtocol(const ManagerProtocol&) = delete;
