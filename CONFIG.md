@@ -30,9 +30,8 @@ Comments begin with `--`:
 
 ```zw
 -- This is a comment.
-decoration = {
-  enabled = true
-  radius = 10 -- Inline comments are allowed.
+layout = {
+  inner-gap = 12 -- Inline comments are allowed.
 }
 ```
 
@@ -75,7 +74,7 @@ process environment variables written as `$VAR` or `${VAR}`. Imports are
 recursive, and cycles are errors.
 
 Imported assignments are inserted where the `import` appears. For singleton
-settings such as `decoration`, `input`, or `output`, the last assignment wins.
+settings such as `shaders`, `input`, or `output`, the last assignment wins.
 Repeated `bind`, `rule`, and `layer-rule` assignments accumulate in declaration
 order.
 
@@ -112,6 +111,7 @@ bind = "Mod4+Shift", Escape, exit, ""
 bind = $MOD, scrollback, zoomin, ""
 bind = $MOD, scrollforward, zoomout, ""
 bind = $MOD, "1", tag, "1"
+bind = $MOD, Left, focus, "left"
 ```
 
 | Action | Argument | Behavior |
@@ -119,7 +119,7 @@ bind = $MOD, "1", tag, "1"
 | `exec` | Shell command | Runs `sh -c ARGUMENT`, resolving `sh` through `PATH`. |
 | `reload` | Ignored | Reloads the active configuration. |
 | `exit` | Ignored | Exits zwwm. |
-| `focus` | Ignored | Cycles focus through managed windows. |
+| `focus` | Empty or `"left"`, `"right"`, `"up"`, `"down"` | Empty cycles focus. A direction selects the nearest visible window in that direction on the same output. Canvas navigation uses world coordinates and is independent of camera pan and zoom. |
 | `killactive` | Ignored | Requests that the focused window close. |
 | `killsession` | Ignored | Terminates the compositor session, currently equivalent to `exit`. |
 | `togglefloating` | Ignored | Toggles the focused window between tiled and floating. |
@@ -131,62 +131,43 @@ bind = $MOD, "1", tag, "1"
 
 Use `""` for actions that do not need an argument.
 
-## Decoration
-
-```zw
-decoration = {
-  enabled = true
-  border-width = 3
-  radius = 10
-  border-color = "#2e3744"
-  focused-border-color = "#3da6f2"
-}
-```
-
-| Field | Type | Default | Range or format |
-|---|---|---:|---|
-| `enabled` | Boolean | `true` | Enables server-side borders and rounding. |
-| `border-width` | Integer | `4` | `0` or greater, pixels. |
-| `radius` | Integer | `10` | `0` or greater, pixels. |
-| `border-color` | Color | `#2e3744` | `#RRGGBB` or `#RRGGBBAA`. |
-| `focused-border-color` | Color | `#3da6f2` | `#RRGGBB` or `#RRGGBBAA`. |
-
-## Blur
-
-Backdrop blur is visible only through transparent client pixels. Window rules
-can override whether blur is enabled and its radius.
-
-```zw
-blur = {
-  enabled = true
-  radius = 8
-  passes = 3
-  brightness = 100
-  contrast = 100
-  saturation = 100
-  noise = 0
-}
-```
-
-| Field | Default | Range |
-|---|---:|---:|
-| `enabled` | `true` | Boolean |
-| `radius` | `8` | `0..64` physical pixels |
-| `passes` | `3` | `1..8` |
-| `brightness` | `100` | `0..200` percent |
-| `contrast` | `100` | `0..200` percent |
-| `saturation` | `100` | `0..200` percent |
-| `noise` | `0` | `0..100` percent |
-
 ## User Shaders
 
-zwwm loads three complete OpenGL ES 3 fragment shaders:
+`shaders` is a registry of named OpenGL ES 3 fragment shaders. Every entry has
+a `role`, a source path, and optional reflected values. At least one `window`,
+`border`, and `background` shader is required. The first shader declared for a
+role is its default.
 
 ```zw
 shaders = {
-  window = "shaders/window.frag"
-  border = "shaders/border.frag"
-  background = "shaders/background.frag"
+  blur = {
+    role = "window"
+    source = "shaders/window.frag"
+    values = {
+      radius = 10
+      blur_radius = 8
+      blur_passes = 3
+      blur_brightness = 100
+      blur_contrast = 100
+      blur_saturation = 100
+      blur_noise = 0
+    }
+  }
+  border = {
+    role = "border"
+    source = "shaders/border.frag"
+    values = {
+      width = 3
+      radius = 10
+      gradient_colors = ["#2e3744", "#1f2731", "#2e3744"]
+      focused_gradient_colors = ["#75c5ff", "#3da6f2", "#2474ae"]
+    }
+  }
+  background = {
+    role = "background"
+    source = "shaders/background.frag"
+    values = { top_color = "#20242b" bottom_color = "#13161b" }
+  }
 }
 ```
 
@@ -196,17 +177,56 @@ Relative paths are resolved beside the active `config.zw`. When neither
 the three editable default shaders beside it. Existing files are never
 overwritten. An explicit `ZWWM_CONFIG` path is never created automatically.
 
-Shader files are read only at startup and by this explicit transaction:
+Shader files are read at startup, after a successful configuration reload, and
+by this explicit transaction (required when only a `.frag` file changes):
 
 ```sh
 zwwmctl rebuild-switch-shaders
 ```
 
-All three shaders are compiled and linked in every active GPU context before
-any are switched. If reading or compiling any shader fails, all contexts keep
-the previous programs and the command reports the diagnostic. The shader files
-are trusted GPU code; malformed source is recoverable, but a GPU-hanging shader
-cannot be sandboxed by the compositor.
+Every registered shader is compiled and linked in every active GPU context
+before any program is switched. If reading, compiling, or validating any shader
+fails, all contexts keep the previous programs and the command reports the
+diagnostic. Shader files are trusted GPU code; malformed source is recoverable,
+but a GPU-hanging shader cannot be sandboxed by the compositor.
+
+### Shader Values
+
+Each value named `NAME` is uploaded to `zwwm_config_NAME`. Supported mappings
+are:
+
+| Configuration value | GLSL uniform |
+|---|---|
+| Boolean | `bool` |
+| Integer | `int`, `uint`, or `float` |
+| `#RRGGBB` or `#RRGGBBAA` | `vec4` with normalized components |
+| Two to four integers | `ivec2..4` or `vec2..4` |
+| One to twenty colors | `vec4 NAME[20]`; `int NAME_count` receives the active count |
+
+Uppercase string variables may provide numeric shader values. For example,
+`RADIUS = "20"` and `radius = $RADIUS` produce an integer value.
+
+Some names also configure the compositor pipeline:
+
+| Role | Value | Meaning |
+|---|---|---|
+| `border` | `width` | Border geometry width. |
+| `border` | `radius` | Window corner radius before canvas and animation scaling. |
+| `window` | `blur_radius` | Prepared backdrop blur radius, `0..64`. |
+| `window` | `blur_passes` | Blur pass count, clamped to `1..8`. |
+| `window` | `blur_brightness`, `blur_contrast`, `blur_saturation` | Percentage controls, clamped to `0..200`. |
+| `window` | `blur_noise` | Noise percentage, clamped to `0..100`. |
+
+All non-pipeline values must have a compatible active uniform in the shader;
+otherwise the transactional rebuild fails and keeps the previous programs.
+Backdrop blur is visible through transparent shader/client pixels.
+
+Use renderer-provided `zwwm_corner_radius`, `zwwm_border_width`, and
+`zwwm_clip_radius` for final geometry. They already include animation and
+endless-canvas zoom scaling; using fixed config pixels directly makes rounding
+change proportion at different zoom levels.
+
+### Shader ABI
 
 Window and border shaders use the compositor's `surface.vert` vertex stage and
 may declare any subset of this ABI:
@@ -243,7 +263,8 @@ a managed surface tree the same root coordinate system, while
 window shader demonstrates clipping and correct sampling of undersized client
 buffers without stretching.
 
-The background shader renders a full-output quad before scene surfaces. It is
+The background shader renders a full-output quad before scene surfaces, before
+any layer-shell wallpaper client. It is
 guaranteed `zwwm_output_size` and `zwwm_time`; it may also use the vertex-stage
 varyings. Animating a shader does not itself schedule frames, so continuous
 animation requires another active repaint source such as a configured animated
@@ -337,6 +358,12 @@ background with the left mouse button to pan the active output and tag. Existing
 Super+left window dragging moves a window in world space, while Super+right
 resizes it. Window movement and viewport panning use the configured window
 geometry animation.
+
+While a window is moved, its edges magnetically snap beside visible windows on
+the same output and tag. The resulting separation is `inner-gap`. The capture
+threshold is 16 output pixels and is converted to world coordinates, so snapping
+feels consistent at every zoom level. Snapped windows remain independent; moving
+one does not move its neighbors.
 
 A new native toplevel first receives an unconstrained `0x0` configure. Its first
 committed positive `set_window_geometry` size becomes its canvas size; without
@@ -438,12 +465,23 @@ environment = {
   XDG_SESSION_DESKTOP = "zwwm"
   XDG_SESSION_TYPE = "wayland"
   XCURSOR_SIZE = "24"
+  XCURSOR_THEME = "Bibata-Modern-Classic"
   TERMINAL = $TERMINAL
 }
 ```
 
 Names must be valid shell identifiers. Values must be strings or uppercase
 string-variable references.
+
+`XCURSOR_THEME` and `XCURSOR_SIZE` provide the startup cursor theme. They use
+the standard Xcursor theme format used by Wayland compositors. To change both
+for the running compositor without editing the environment, use:
+
+```sh
+zwwmctl setcursor "Bibata-Modern-Classic" 24
+```
+
+This runtime override is not written back to `config.zw`.
 
 ## Autostart
 
@@ -472,9 +510,8 @@ rule = {
   set = {
     floating = true
     size = "60%x70%"
-    blur = true
-    blur-radius = 12
-    glass = false
+    window-shader = "blur"
+    border-shader = "border"
     opacity = 95
   }
 }
@@ -489,15 +526,14 @@ rule = {
 |---|---|---|
 | `floating` | Boolean | Select tiled or floating placement |
 | `size` | String | `WIDTHxHEIGHT` pixels or `WIDTH%xHEIGHT%` of the work area |
-| `blur` | Boolean | Enable or disable backdrop blur |
-| `blur-radius` | Integer | `0..64`; also enables a nonzero blur radius |
-| `glass` | Boolean | Enable or disable glass |
+| `window-shader` | Registered shader name | Selects a shader with role `window` |
+| `border-shader` | Registered shader name | Selects a shader with role `border` |
 | `opacity` | Integer | `0..100` percent |
 
 Examples:
 
 ```zw
-rule = { match = { app-id = "foot" } set = { opacity = 92 blur = true } }
+rule = { match = { app-id = "foot" } set = { opacity = 92 window-shader = "blur" } }
 rule = { match = { title = "Picture-in-Picture" } set = { floating = true size = "30%x30%" } }
 ```
 
@@ -542,6 +578,26 @@ The equivalent Wayland manager command is:
 zwwmctl reload
 ```
 
+Other control and inspection commands include:
+
+```sh
+zwwmctl status
+zwwmctl outputs
+zwwmctl clients
+zwwmctl tags
+zwwmctl layers
+zwwmctl camera
+zwwmctl camera -j
+zwwmctl dispatch focus left
+zwwmctl rebuild-switch-shaders
+zwwmctl setcursor "Bibata-Modern-Classic" 24
+```
+
+`camera` reports one row per output for its active tag: connector, output ID,
+tag, world X, world Y, zoom level, and whether the output is active. JSON output
+returns these as named fields in a `cameras` array. Camera reporting requires
+manager protocol version 4, included since zwwm `0.1.1-alpha.1`.
+
 Successful reloads update layout, rendering, input, keyboard state, logical
 output scale and transform, bindings, rules, animations, and environment
 values. Existing processes keep their own inherited environment. Restart zwwm
@@ -551,9 +607,7 @@ after changing the requested DRM mode or bit depth.
 
 - Configuration compatibility is not guaranteed yet.
 - Output settings are global and do not currently match individual connectors.
-- Glass is GPU-intensive and disabled by default.
 - Unknown settings produce diagnostics; misspelled fields should not be relied
   upon being ignored.
 
 For a complete ready-to-run configuration, see `zwwm/data/config.zw`.
-And Have Fun with custom shader XD
