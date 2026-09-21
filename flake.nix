@@ -14,6 +14,7 @@
           mkZwwm = { xwayland ? true }:
             pkgs.callPackage ./nix/package.nix {
               inherit self;
+              stdenv = pkgs.clangStdenv;
               xwaylandSupport = xwayland;
               wrapQtAppsHook = pkgs.qt6.wrapQtAppsHook;
             };
