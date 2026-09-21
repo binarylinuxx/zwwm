@@ -99,9 +99,10 @@ A binding contains exactly four comma-separated values:
 bind = MODIFIERS, KEY, ACTION, ARGUMENT
 ```
 
-Modifiers are XKB modifier names joined with `+`. Keyboard keys use XKB keysym
-names. `scrollback` and `scrollforward` match vertical mouse-wheel movement.
-Quote values when needed.
+Modifiers are XKB modifier names joined with `+`. Omit the first value or use an
+empty string when no modifier is required. Keyboard keys use XKB keysym names.
+`scrollback` and `scrollforward` match vertical mouse-wheel movement. Quote
+values when needed.
 
 ```zw
 MOD = "Mod4"
@@ -112,6 +113,7 @@ bind = $MOD, scrollback, zoomin, ""
 bind = $MOD, scrollforward, zoomout, ""
 bind = $MOD, "1", tag, "1"
 bind = $MOD, Left, focus, "left"
+bind = , Home, exec, "jes-cli screenpicker"
 ```
 
 | Action | Argument | Behavior |

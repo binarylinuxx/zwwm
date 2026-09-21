@@ -27,6 +27,14 @@ int main() {
   assert(parsed.ok());
   assert(parsed.config.assignments.size() == 8);
 
+  const auto omitted_first = zwwm::lang::parse_config(
+      "bind = , Home, exec, \"jes-cli screenpicker\"\n");
+  assert(omitted_first.ok());
+  const auto* binding = zwwm::lang::as_list(omitted_first.config.assignments.front().value);
+  assert(binding != nullptr && binding->values.size() == 4);
+  assert(zwwm::lang::as_string(binding->values[0])->empty());
+  assert(*zwwm::lang::as_string(binding->values[1]) == "Home");
+
   const auto values = zwwm::lang::parse_config("number = -42\nempty = null\nitems = [1, 2,]\n");
   assert(values.ok());
   assert(*zwwm::lang::as_integer(*zwwm::lang::find_assignment(values.config, "number")) == -42);

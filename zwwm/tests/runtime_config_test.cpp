@@ -81,6 +81,12 @@ int main() {
   const auto logical_point = valid.config->output.physical_to_logical(physical_point, {2560, 1440});
   assert(logical_point.x == 100 && logical_point.y == 200);
 
+  const auto key_only = compile(R"(bind = , Home, exec, "jes-cli screenpicker")");
+  assert(key_only.ok());
+  assert(key_only.config->keybindings.size() == 1);
+  assert(key_only.config->keybindings[0].modifiers.empty());
+  assert(key_only.config->keybindings[0].key == "Home");
+
   assert(!compile("decoration = { border-width = -1 }").ok());
   assert(!compile("decoration = { border-color = \"#12345g\" }").ok());
   assert(!compile("layout = { master-count = 0 }").ok());

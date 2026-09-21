@@ -117,11 +117,14 @@ class Parser {
   }
 
   std::optional<Value> parse_value_list() {
-    const auto first = parse_value();
-    if (!first.has_value()) {
-      return std::nullopt;
+    Value::List list;
+    if (peek() == ',') {
+      list.values.emplace_back(std::string{});
+    } else {
+      const auto first = parse_value();
+      if (!first.has_value()) return std::nullopt;
+      list.values.push_back(*first);
     }
-    Value::List list{{*first}};
     while (consume(',')) {
       const auto next = parse_value();
       if (!next.has_value()) {

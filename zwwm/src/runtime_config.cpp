@@ -397,8 +397,9 @@ RuntimeConfigResult compile_runtime_config(const lang::Config& parsed) {
     const auto* action = resolved_string(list->values[2], variables);
     const auto* argument = resolved_string(list->values[3], variables);
     if (modifiers == nullptr || key == nullptr || action == nullptr || argument == nullptr ||
-        modifiers->empty() || key->empty() || action->empty()) {
-      error(result.diagnostics, item.location, "bind values must resolve to nonempty strings");
+        key->empty() || action->empty()) {
+      error(result.diagnostics, item.location,
+            "bind key and action must resolve to nonempty strings");
       continue;
     }
     const auto typed_action = key_action(*action);
