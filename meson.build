@@ -1,7 +1,7 @@
 project(
   'zwwm',
   ['c', 'cpp'],
-  version: '0.1.0-alpha.1',
+  version: '0.1.1-alpha.1',
   meson_version: '>=1.4.0',
   default_options: ['cpp_std=c++23', 'cpp_eh=default', 'buildtype=release'],
 )

@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(zwwm VERSION 0.1.0 LANGUAGES C CXX)
+project(zwwm VERSION 0.1.1 LANGUAGES C CXX)
 
-set(ZWWM_VERSION "0.1.0-alpha.1")
+set(ZWWM_VERSION "0.1.1-alpha.1")
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

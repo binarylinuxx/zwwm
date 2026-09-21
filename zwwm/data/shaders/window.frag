@@ -15,6 +15,7 @@ uniform bool zwwm_has_texture;
 uniform vec4 zwwm_clip_rect;
 uniform vec4 zwwm_texture_rect;
 uniform vec2 zwwm_output_size;
+uniform float zwwm_clip_radius;
 uniform int zwwm_state;
 uniform int zwwm_config_radius;
 
@@ -45,9 +46,8 @@ void main() {
   vec3 backdrop = texture(zwwm_blurred_backdrop_texture,
                           clamp(backdrop_uv, vec2(0.0), vec2(1.0))).rgb;
   color += vec4(backdrop, 1.0) * (1.0 - color.a);
-  float clip_radius = (zwwm_state & 2) != 0 ? 0.0 : float(zwwm_config_radius);
   float coverage = clamp(0.5 - rounded_rect_distance(
       target_pixel_coordinates - zwwm_clip_rect.xy, zwwm_clip_rect.zw,
-      clip_radius), 0.0, 1.0);
+      zwwm_clip_radius), 0.0, 1.0);
   fragment_color = color * zwwm_opacity * coverage;
 }

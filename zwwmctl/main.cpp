@@ -130,6 +130,19 @@ std::string json_line(std::string_view line) {
     }
     return result + "]}";
   }
+  if (fields[1] == "camera" && fields.size() >= 3) {
+    std::string result = "{\"ok\":true,\"cameras\":["; std::size_t at = 3;
+    const std::size_t count = std::strtoull(fields[2].c_str(), nullptr, 10);
+    for (std::size_t index = 0; index < count; ++index, at += 7) {
+      if (at + 7 > fields.size()) return "{\"ok\":false,\"error\":\"truncated camera response\"}";
+      if (index != 0) result += ',';
+      result += "{\"connector\":" + json_string(fields[at]) + ",\"output\":" + fields[at + 1] +
+                ",\"tag\":" + fields[at + 2] + ",\"x\":" + fields[at + 3] +
+                ",\"y\":" + fields[at + 4] + ",\"zoom\":" + fields[at + 5] +
+                ",\"active\":" + (fields[at + 6] == "1" ? "true" : "false") + "}";
+    }
+    return result + "]}";
+  }
   return "{\"ok\":false,\"error\":\"unsupported protocol response\"}";
 }
 
@@ -209,6 +222,15 @@ struct SnapshotHandler {
       add(self.fields, name_space); add_number(self.fields, layer_value); add_number(self.fields, priority); add_number(self.fields, zone);
       add_number(self.fields, blur); add(self.fields, std::to_string(opacity / 1000000.0)); add_number(self.fields, mapped);
   }
+  void camera(zwayland::client::Proxy&, const std::string& connector,
+              std::uint32_t output_hi, std::uint32_t output_lo, std::uint32_t tag,
+              const std::string& x, const std::string& y, const std::string& zoom,
+              std::uint32_t active) {
+      auto& self = *client; ++self.count;
+      add(self.fields, connector); add_number(self.fields, combine(output_hi, output_lo));
+      add_number(self.fields, tag); add(self.fields, x); add(self.fields, y); add(self.fields, zoom);
+      add_number(self.fields, active);
+  }
   void done(zwayland::client::Proxy&) { client->done = true; }
   void failed(zwayland::client::Proxy&, const std::string& message) {
     client->failed = true; client->done = true;
@@ -241,7 +263,7 @@ struct RegistryHandler {
     if (interface == protocol::ext_zwwm_manager_v1_interface.name)
       client->manager = zwayland::client::core::bind(
           *client->display, registry, name, protocol::ext_zwwm_manager_v1_interface,
-      std::min(version, 3U));
+      std::min(version, 4U));
   }
   void global_remove(zwayland::client::Proxy&, std::uint32_t) {}
 };
@@ -261,7 +283,7 @@ std::string line(const Client& client) {
 }
 
 void usage(const char* program) {
-  std::fprintf(stderr, "usage: %s {version|ping|status|output|outputs|clients|tags|layers|reload|rebuild-switch-shaders|setcursor THEME SIZE|dispatch ACTION [ARG]|events [EVENT ...]} [-j|--json]\n", program);
+  std::fprintf(stderr, "usage: %s {version|ping|status|output|outputs|clients|tags|layers|camera|reload|rebuild-switch-shaders|setcursor THEME SIZE|dispatch ACTION [ARG]|events [EVENT ...]} [-j|--json]\n", program);
 }
 
 std::uint32_t event_mask(const std::vector<std::string>& events) {
@@ -313,14 +335,20 @@ int main(int argc, char** argv) {
 
   bool stream = false;
   if (command == "status" || command == "output" || command == "outputs" || command == "clients" ||
-      command == "tags" || command == "layers") {
+      command == "tags" || command == "layers" || command == "camera") {
     if (!arguments.empty()) { usage(argv[0]); return EXIT_FAILURE; }
+    if (command == "camera" && client.manager->version < 4) {
+      std::fputs("zwwmctl: camera requires restarting zwwm with manager protocol version 4\n", stderr);
+      return EXIT_FAILURE;
+    }
     client.kind = command == "output" ? "outputs" : command;
     client.fields.clear();
     const std::uint32_t type = client.kind == "status" ? protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_STATUS :
         client.kind == "outputs" ? protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_OUTPUTS :
         client.kind == "clients" ? protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_TOPLEVELS :
-        client.kind == "tags" ? protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_TAGS : protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_LAYERS;
+        client.kind == "tags" ? protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_TAGS :
+        client.kind == "camera" ? protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_CAMERAS :
+        protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_LAYERS;
     protocol::ext_zwwm_snapshot_v1_observe(*client.display, SnapshotHandler{&client});
     const std::uint32_t snapshot_id = protocol::ext_zwwm_manager_v1_get_snapshot(
         *client.display, client.manager->id, type);

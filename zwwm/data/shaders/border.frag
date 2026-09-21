@@ -117,9 +117,8 @@ float rounded_perimeter_position(vec2 point, vec2 size, float radius, float widt
 
 void main() {
   vec2 size = zwwm_draw_rect.zw;
-  float configured_width = float(zwwm_config_width);
-  float width = configured_width + max(zwwm_border_width - configured_width, 0.0);
-  float radius = max(zwwm_corner_radius, float(zwwm_config_radius) + configured_width);
+  float width = zwwm_border_width;
+  float radius = zwwm_corner_radius;
   float outer = clamp(0.5 - rounded_rect_distance(local_pixel_coordinates, size,
                                                    radius), 0.0, 1.0);
   vec2 inner_size = size - vec2(2.0 * width);

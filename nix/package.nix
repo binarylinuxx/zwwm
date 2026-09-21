@@ -30,7 +30,7 @@
 
 stdenv.mkDerivation {
   pname = "zwwm";
-  version = "0.1.0-alpha.1";
+  version = "0.1.1-alpha.1";
 
   src = lib.fileset.toSource {
     root = ../.;

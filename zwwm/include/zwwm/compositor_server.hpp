@@ -121,6 +121,16 @@ struct LayerInfo {
   bool mapped = false;
 };
 
+struct CameraInfo {
+  OutputId output;
+  std::string connector;
+  std::uint8_t tag = 1;
+  double x = 0.0;
+  double y = 0.0;
+  double zoom = 1.0;
+  bool active = false;
+};
+
 class CompositorServer {
  public:
   using SurfaceCommitObserver = void (*)(void*, const ShmBufferView&);
@@ -168,6 +178,7 @@ class CompositorServer {
   [[nodiscard]] std::vector<ToplevelInfo> toplevels() const;
   [[nodiscard]] std::vector<TagInfo> tags() const;
   [[nodiscard]] std::vector<LayerInfo> layers() const;
+  [[nodiscard]] std::vector<CameraInfo> cameras() const;
   // Executes a configured action name. Reload is owned by the caller.
   [[nodiscard]] bool dispatch_action(const std::string& action, const std::string& argument,
                                      std::string* error);

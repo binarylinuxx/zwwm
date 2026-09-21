@@ -2946,6 +2946,17 @@ std::vector<OutputInfo> CompositorServer::outputs() const {
   for (const auto& output : impl_->outputs) result.push_back(output->info);
   return result;
 }
+std::vector<CameraInfo> CompositorServer::cameras() const {
+  std::vector<CameraInfo> result;
+  result.reserve(impl_->outputs.size());
+  for (const auto& output : impl_->outputs) {
+    const auto tag = output->active_tag;
+    const auto& viewport = output->canvas_viewports[tag - 1];
+    result.push_back({output->info.id, output->info.connector, tag, viewport.x, viewport.y,
+                      viewport.scale, output->info.id == impl_->active_output});
+  }
+  return result;
+}
 
 zwayland::server::Resource* CompositorServer::output_resource(zwayland::server::Client* client, OutputId id) const {
   const auto output = std::find_if(impl_->outputs.begin(), impl_->outputs.end(), [&](const auto& item) {
@@ -3165,6 +3176,65 @@ bool CompositorServer::dispatch_action(const std::string& action, const std::str
       if (is_visible) visible.push_back(surface);
     }
     if (visible.empty()) return fail("no visible window");
+    if (!argument.empty()) {
+      if (argument != "left" && argument != "right" && argument != "up" && argument != "down")
+        return fail("focus direction must be left, right, up, or down");
+      const auto output_of = [](const SurfaceState* surface) {
+        if (surface->xdg_surface != nullptr) return surface->xdg_surface->output;
+#ifdef ZWWM_XWAYLAND
+        if (surface->xwayland_surface != nullptr) return surface->xwayland_surface->output;
+#endif
+        return OutputId{};
+      };
+      const auto center_of = [&](const SurfaceState* surface) -> std::pair<double, double> {
+        if (const auto* candidate = surface->xdg_surface; candidate != nullptr) {
+          if (endless_canvas(&impl_->observer) && candidate->canvas_bounds.initialized)
+            return {candidate->canvas_bounds.x + candidate->canvas_bounds.width * 0.5,
+                    candidate->canvas_bounds.y + candidate->canvas_bounds.height * 0.5};
+          return {candidate->tile_bounds.x + candidate->tile_bounds.width * 0.5,
+                  candidate->tile_bounds.y + candidate->tile_bounds.height * 0.5};
+        }
+#ifdef ZWWM_XWAYLAND
+        const auto* candidate = surface->xwayland_surface;
+        if (endless_canvas(&impl_->observer) && candidate->canvas_bounds.initialized)
+          return {candidate->canvas_bounds.x + candidate->canvas_bounds.width * 0.5,
+                  candidate->canvas_bounds.y + candidate->canvas_bounds.height * 0.5};
+        return {candidate->tile_bounds.x + candidate->tile_bounds.width * 0.5,
+                candidate->tile_bounds.y + candidate->tile_bounds.height * 0.5};
+#else
+        return {};
+#endif
+      };
+      if (focused == nullptr || std::find(visible.begin(), visible.end(), focused) == visible.end()) {
+        set_keyboard_focus(&seat, visible.front());
+        configure_layout(&impl_->observer);
+        return true;
+      }
+      const auto origin = center_of(focused);
+      const auto output = output_of(focused);
+      SurfaceState* nearest = nullptr;
+      double nearest_distance = std::numeric_limits<double>::infinity();
+      for (auto* candidate : visible) {
+        if (candidate == focused || output_of(candidate) != output) continue;
+        const auto center = center_of(candidate);
+        const double dx = center.first - origin.first;
+        const double dy = center.second - origin.second;
+        const bool direction_matches = argument == "left" ? dx < 0.0 :
+            argument == "right" ? dx > 0.0 : argument == "up" ? dy < 0.0 : dy > 0.0;
+        if (!direction_matches) continue;
+        const double primary = argument == "left" || argument == "right" ? dx : dy;
+        const double secondary = argument == "left" || argument == "right" ? dy : dx;
+        const double distance = primary * primary + secondary * secondary * 2.0;
+        if (distance < nearest_distance) {
+          nearest = candidate;
+          nearest_distance = distance;
+        }
+      }
+      if (nearest == nullptr) return fail("no visible window in that direction");
+      set_keyboard_focus(&seat, nearest);
+      configure_layout(&impl_->observer);
+      return true;
+    }
     auto current = std::find(visible.begin(), visible.end(), focused);
     if (current == visible.end() || ++current == visible.end()) current = visible.begin();
     set_keyboard_focus(&seat, *current);

@@ -2,6 +2,13 @@
 
 All notable changes to zwwm are documented here.
 
+## 0.1.1-alpha.1 - 2026-09-21
+
+- Added magnetic endless-canvas window snapping with configured gaps.
+- Added directional arrow-key focus navigation.
+- Added runtime cursor theme control and camera state reporting to `zwwmctl`.
+- Improved zoom-consistent shader rounding and cursor handling.
+
 ## 0.1.0-alpha.1 - 2026-09-20
 
 Basically first public alpha release.
