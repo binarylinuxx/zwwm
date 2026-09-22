@@ -30,12 +30,13 @@
 
 stdenv.mkDerivation {
   pname = "zwwm";
-  version = "0.1.1-alpha.1";
+  version = lib.strings.trim (builtins.readFile ../.version);
 
   src = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [
       ../CMakeLists.txt
+      ../.version
       ../README.md
       ../CONFIG.md
       ../CHANGELOG.md

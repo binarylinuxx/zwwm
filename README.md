@@ -3,7 +3,7 @@ zwwm is a C++23 post-Wayland compositor with a Wayland stack rebuilt from the gr
 even though in 2026 everyone seems to be rewriting everything in Rust.
 
 > [!WARNING]
-> `0.1.1-alpha.1` is the current public alpha. Configuration, private zwwm
+> `0.1.2-alpha.1` is the current public alpha. Configuration, private zwwm
 > protocols, APIs, behavior, and internal architecture may change without
 > backward compatibility. Use it only if you accept that instability.
 
