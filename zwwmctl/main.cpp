@@ -166,16 +166,39 @@ struct Client {
   bool done = false;
   bool failed = false;
   bool json = false;
+  bool refresh_pending = false;
+  std::vector<std::string> live_clients;
+  std::vector<std::string> live_tags;
+  std::vector<std::string> live_cameras;
+  std::string live_keyboard = "null";
 
   void output(std::string line) const {
     const std::string rendered = json ? json_line(line) : line;
     std::puts(rendered.c_str());
     std::fflush(stdout);
   }
+
+  void output_live() const {
+    const auto array = [](const std::vector<std::string>& items) {
+      std::string result = "[";
+      for (std::size_t index = 0; index < items.size(); ++index) {
+        if (index != 0) result += ',';
+        result += items[index];
+      }
+      return result + ']';
+    };
+    const std::string result = "{\"clients\":" + array(live_clients) +
+        ",\"tags\":" + array(live_tags) + ",\"cameras\":" + array(live_cameras) +
+        ",\"keyboard\":" + live_keyboard + '}';
+    std::puts(result.c_str());
+    std::fflush(stdout);
+  }
 };
 
 void add(std::vector<std::string>& fields, std::string value) { fields.push_back(std::move(value)); }
 template <typename T> void add_number(std::vector<std::string>& fields, T value) { fields.push_back(std::to_string(value)); }
+
+void request_live_snapshot(Client* client);
 
 struct SnapshotHandler {
   Client* client;
@@ -206,14 +229,33 @@ struct SnapshotHandler {
                 const std::string& app_id, const std::string& title, std::uint32_t output_hi,
                 std::uint32_t output_lo, std::int32_t x, std::int32_t y, std::int32_t width,
                 std::int32_t height, std::uint32_t state) {
-      auto& self = *client; ++self.count;
+      auto& self = *client;
+      if (self.kind == "listen") {
+        self.live_clients.push_back(
+            "{\"id\":" + std::to_string(combine(id_hi, id_lo)) +
+            ",\"app_id\":" + json_string(app_id) + ",\"title\":" + json_string(title) +
+            ",\"output\":" + std::to_string(combine(output_hi, output_lo)) +
+            ",\"x\":" + std::to_string(x) + ",\"y\":" + std::to_string(y) +
+            ",\"width\":" + std::to_string(width) + ",\"height\":" + std::to_string(height) +
+            ",\"state\":" + std::to_string(state) + '}');
+        return;
+      }
+      ++self.count;
       add_number(self.fields, combine(id_hi, id_lo)); add(self.fields, app_id); add(self.fields, title);
       add_number(self.fields, combine(output_hi, output_lo)); add_number(self.fields, x); add_number(self.fields, y);
       add_number(self.fields, width); add_number(self.fields, height); add_number(self.fields, state);
   }
   void tag(zwayland::client::Proxy&, const std::string& connector, std::uint32_t output_hi,
            std::uint32_t output_lo, std::uint32_t active) {
-      auto& self = *client; ++self.count;
+      auto& self = *client;
+      if (self.kind == "listen") {
+        self.live_tags.push_back(
+            "{\"connector\":" + json_string(connector) +
+            ",\"output\":" + std::to_string(combine(output_hi, output_lo)) +
+            ",\"active\":" + std::to_string(active) + '}');
+        return;
+      }
+      ++self.count;
       add(self.fields, connector); add_number(self.fields, combine(output_hi, output_lo)); add_number(self.fields, active);
   }
   void layer(zwayland::client::Proxy&, std::uint32_t id_hi, std::uint32_t id_lo,
@@ -229,18 +271,53 @@ struct SnapshotHandler {
               std::uint32_t output_hi, std::uint32_t output_lo, std::uint32_t tag,
               const std::string& x, const std::string& y, const std::string& zoom,
               std::uint32_t active) {
-      auto& self = *client; ++self.count;
+      auto& self = *client;
+      if (self.kind == "listen") {
+        self.live_cameras.push_back(
+            "{\"connector\":" + json_string(connector) +
+            ",\"output\":" + std::to_string(combine(output_hi, output_lo)) +
+            ",\"tag\":" + std::to_string(tag) + ",\"x\":" + x +
+            ",\"y\":" + y + ",\"zoom\":" + zoom +
+            ",\"active\":" + (active == 1 ? "true" : "false") + '}');
+        return;
+      }
+      ++self.count;
       add(self.fields, connector); add_number(self.fields, combine(output_hi, output_lo));
       add_number(self.fields, tag); add(self.fields, x); add(self.fields, y); add(self.fields, zoom);
        add_number(self.fields, active);
   }
   void keyboard(zwayland::client::Proxy&, const std::string& layout, std::uint32_t group) {
+      if (client->kind == "listen") {
+        client->live_keyboard = "{\"layout\":" + json_string(layout) +
+            ",\"group\":" + std::to_string(group) + '}';
+        return;
+      }
       ++client->count;
       add(client->fields, layout);
       add_number(client->fields, group);
   }
-  void done(zwayland::client::Proxy&) { client->done = true; }
+  void done(zwayland::client::Proxy&) {
+    if (client->kind != "listen") {
+      client->done = true;
+      return;
+    }
+    client->output_live();
+    if (client->snapshot != nullptr) {
+      protocol::ext_zwwm_snapshot_v1_destroy(*client->display, client->snapshot->id);
+      client->snapshot = nullptr;
+    }
+    if (client->refresh_pending) {
+      client->refresh_pending = false;
+      request_live_snapshot(client);
+    }
+  }
   void failed(zwayland::client::Proxy&, const std::string& message) {
+    if (client->kind == "listen") {
+      std::fprintf(stderr, "zwwmctl: live snapshot failed: %s\n", message.c_str());
+      client->failed = true;
+      interrupted = 1;
+      return;
+    }
     client->failed = true; client->done = true;
     client->fields = {"error", message.empty() ? "snapshot failed" : message};
   }
@@ -260,6 +337,11 @@ struct ResultHandler {
 struct SubscriptionHandler {
   Client* client;
   void event(zwayland::client::Proxy&, const std::string& event) {
+    if (client->kind == "listen") {
+      if (client->snapshot == nullptr) request_live_snapshot(client);
+      else client->refresh_pending = true;
+      return;
+    }
     client->output("event\t" + escape(event));
   }
 };
@@ -271,7 +353,7 @@ struct RegistryHandler {
     if (interface == protocol::ext_zwwm_manager_v1_interface.name)
       client->manager = zwayland::client::core::bind(
           *client->display, registry, name, protocol::ext_zwwm_manager_v1_interface,
-      std::min(version, 5U));
+      std::min(version, 6U));
   }
   void global_remove(zwayland::client::Proxy&, std::uint32_t) {}
 };
@@ -291,11 +373,11 @@ std::string line(const Client& client) {
 }
 
 void usage(const char* program) {
-  std::fprintf(stderr, "usage: %s {version|ping|status|output|outputs|clients|tags|layers|camera|keyboard|reload|rebuild-switch-shaders|setcursor THEME SIZE|dispatch ACTION [ARG]|events [EVENT ...]} [-j|--json]\n", program);
+  std::fprintf(stderr, "usage: %s {version|ping|status|output|outputs|clients|tags|layers|camera|keyboard|listen|reload|rebuild-switch-shaders|setcursor THEME SIZE|dispatch ACTION [ARG]|events [EVENT ...]} [-j|--json]\n", program);
 }
 
 std::uint32_t event_mask(const std::vector<std::string>& events) {
-  if (events.empty()) return 0x7fU;
+  if (events.empty()) return 0x1ffU;
   std::uint32_t result = 0;
   for (const auto& event : events) {
     if (event == "ready") result |= protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_READY;
@@ -305,9 +387,21 @@ std::uint32_t event_mask(const std::vector<std::string>& events) {
     else if (event == "layer") result |= protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_LAYER;
     else if (event == "output") result |= protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_OUTPUT;
     else if (event == "shutdown") result |= protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_SHUTDOWN;
+    else if (event == "camera") result |= protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_CAMERA;
+    else if (event == "keyboard") result |= protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_KEYBOARD;
     else return 0;
   }
   return result;
+}
+
+void request_live_snapshot(Client* client) {
+  client->live_clients.clear();
+  client->live_tags.clear();
+  client->live_cameras.clear();
+  client->live_keyboard = "null";
+  const std::uint32_t snapshot_id = protocol::ext_zwwm_manager_v1_get_snapshot(
+      *client->display, client->manager->id, protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_LIVE);
+  client->snapshot = client->display->find_proxy(snapshot_id);
 }
 }  // namespace
 
@@ -405,6 +499,26 @@ int main(int argc, char** argv) {
     const std::uint32_t subscription_id = protocol::ext_zwwm_manager_v1_subscribe(
         *client.display, client.manager->id, mask);
     client.subscription = client.display->find_proxy(subscription_id);
+    stream = true;
+    std::signal(SIGINT, stop); std::signal(SIGTERM, stop);
+  } else if (command == "listen") {
+    if (!arguments.empty() || client.manager->version < 6) {
+      if (client.manager->version < 6)
+        std::fputs("zwwmctl: listen requires restarting zwwm with manager protocol version 6\n", stderr);
+      else usage(argv[0]);
+      return EXIT_FAILURE;
+    }
+    client.kind = "listen";
+    protocol::ext_zwwm_snapshot_v1_observe(*client.display, SnapshotHandler{&client});
+    protocol::ext_zwwm_subscription_v1_observe(*client.display, SubscriptionHandler{&client});
+    constexpr std::uint32_t mask = protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_WINDOW |
+        protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_TAG |
+        protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_CAMERA |
+        protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_KEYBOARD;
+    const std::uint32_t subscription_id = protocol::ext_zwwm_manager_v1_subscribe(
+        *client.display, client.manager->id, mask);
+    client.subscription = client.display->find_proxy(subscription_id);
+    request_live_snapshot(&client);
     stream = true;
     std::signal(SIGINT, stop); std::signal(SIGTERM, stop);
   } else {

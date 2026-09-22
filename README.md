@@ -57,6 +57,8 @@ session, enables graphics support, and configures the zwwm/GTK portal set.
 ```sh
 nix develop
 cmake -S . -B build -G Ninja \
+  -DCMAKE_C_COMPILER=clang \
+  -DCMAKE_CXX_COMPILER=clang++ \
   -DCMAKE_INSTALL_PREFIX=/usr \
   -DCMAKE_BUILD_TYPE=Release \
   -DXWAYLAND_ENABLE=ON
@@ -77,7 +79,7 @@ protocol bindings, embedded shaders, strict warnings, and Qt MOC pipeline:
 
 ```sh
 nix develop
-meson setup build-meson --buildtype=release --prefix=/usr -Dxwayland=true
+CC=clang CXX=clang++ meson setup build-meson --buildtype=release --prefix=/usr -Dxwayland=true
 meson compile -C build-meson -j2
 ```
 
@@ -127,8 +129,13 @@ complete GLSL interface.
 - `xdg-desktop-portal-zwwm/`: desktop portal
 - `zwwmctl/`: `ext-zwwm-manager-v1` Wayland command-line client
 
-# Maintaince terms 
-- zwwm are built from the beginning to be clang compitable if you're maintaining zwwm for any distribution using GCC your issue very likely will get low priority assuming compiler quirks
+## Maintenance Terms
+
+zwwm has been developed for Clang from the beginning. Clang is the only
+officially supported C and C++ toolchain, and the CMake and Meson builds reject
+other compilers. Distribution maintainers may carry their own GCC adaptations,
+but GCC-specific build failures and compiler quirks are outside the project's
+normal support scope and will receive low priority.
 ## License
 
 zwwm is licensed under the [BSD 3-Clause License](LICENSE). Redistribution and

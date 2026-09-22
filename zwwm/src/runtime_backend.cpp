@@ -1268,9 +1268,16 @@ void RuntimeBackend::repaint(DrmOutput& card) {
   std::vector<AnimationTarget> animation_targets;
   animation_targets.reserve(card.shm_textures.size());
   for (const auto& surface : card.shm_textures) {
+    const auto bounds = assigned_tile(surface);
+    const renderer::Rect viewport{{card.output.logical_x, card.output.logical_y},
+                                  {card.output.logical_width, card.output.logical_height}};
+    if (tag && surface.toplevel && !backend_scene::intersects(bounds, viewport)) {
+      card.animations.remove(surface.id);
+      continue;
+    }
     if (surface.toplevel && !surface.removed && surface.content_ready && surface.texture != 0)
       animation_targets.push_back(
-          {surface.id, assigned_tile(surface), !surface.suppress_geometry_animation,
+          {surface.id, bounds, !surface.suppress_geometry_animation,
             !tag || surface.tag_outgoing, surface.track_geometry_animation});
   }
   card.animations.update(animation_targets, now);

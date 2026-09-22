@@ -849,8 +849,14 @@ void NestedBackend::repaint_gpu() {
   std::vector<AnimationTarget> animation_targets;
   animation_targets.reserve(windows_.size());
   for (const auto& window : windows_) {
+    const auto bounds = assigned_tile(window);
+    const renderer::Rect viewport{{0, 0}, {logical_width_, logical_height_}};
+    if (tag && window.toplevel && !backend_scene::intersects(bounds, viewport)) {
+      animations_.remove(window.id);
+      continue;
+    }
     if (window.toplevel && !window.removed && window.content_ready && window.texture != 0)
-      animation_targets.push_back({window.id, assigned_tile(window),
+      animation_targets.push_back({window.id, bounds,
                                      !window.suppress_geometry_animation,
                                      !tag || window.tag_outgoing,
                                      window.track_geometry_animation});
@@ -1035,8 +1041,14 @@ void NestedBackend::repaint() {
   std::vector<AnimationTarget> animation_targets;
   animation_targets.reserve(windows_.size());
   for (const auto& window : windows_) {
+    const auto bounds = assigned_tile(window);
+    const renderer::Rect viewport{{0, 0}, {logical_width_, logical_height_}};
+    if (tag && window.toplevel && !backend_scene::intersects(bounds, viewport)) {
+      animations_.remove(window.id);
+      continue;
+    }
     if (window.toplevel && !window.removed && window.content_ready && !window.pixels.empty())
-      animation_targets.push_back({window.id, assigned_tile(window),
+      animation_targets.push_back({window.id, bounds,
                                      !window.suppress_geometry_animation,
                                      !tag || window.tag_outgoing,
                                      window.track_geometry_animation});

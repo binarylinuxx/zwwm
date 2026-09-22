@@ -12,6 +12,7 @@
 
 #include "zwwm/runtime_config.hpp"
 #include "zwwm/layout/canvas.hpp"
+#include "zwwm/camera.hpp"
 #include "zwwm/layout/focus_fibonacci.hpp"
 #include "zwwm/unique_fd.hpp"
 
@@ -93,6 +94,9 @@ struct Observer {
   std::int32_t output_width = 960, output_height = 540;
   std::int32_t physical_width = 960, physical_height = 540;
   std::uint32_t refresh_millihz = 60000;
+  zwwm::Camera camera;
+  OutputId camera_output;
+  std::uint8_t camera_tag = 0;
 };
 
 struct Pool { void* mapping = nullptr; std::size_t size = 0; UniqueFd fd; std::size_t buffers = 0; bool destroyed = false; };
@@ -203,7 +207,6 @@ struct SeatState {
   bool compositor_interactive = false;
   bool tiled_resize = false;
   bool canvas_panning = false;
-  bool canvas_zooming = false;
   std::uint32_t interactive_button = 0;
   OutputId interactive_output;
   std::uint64_t weight_before = 0, weight_after = 0;

@@ -29,6 +29,8 @@ std::uint32_t event_bit(const std::string& event) {
   if (event == "layer") return protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_LAYER;
   if (event == "output") return protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_OUTPUT;
   if (event == "shutdown") return protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_SHUTDOWN;
+  if (event == "camera") return protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_CAMERA;
+  if (event == "keyboard") return protocol::EXT_ZWWM_MANAGER_V1_EVENT_MASK_KEYBOARD;
   return 0;
 }
 
@@ -78,7 +80,7 @@ struct ManagerProtocol::Impl {
 
   void send_snapshot(zwayland::server::Resource* resource, std::uint32_t type) {
     if (type == protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_STATUS) {
-      protocol::ext_zwwm_snapshot_v1_send_status(*resource, 5, compositor->outputs().size(),
+      protocol::ext_zwwm_snapshot_v1_send_status(*resource, 6, compositor->outputs().size(),
                                         compositor->toplevels().size(), compositor->layers().size());
     } else if (type == protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_OUTPUTS) {
       for (const auto& output : compositor->outputs()) {
@@ -121,7 +123,26 @@ struct ManagerProtocol::Impl {
     } else if (type == protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_KEYBOARD) {
       const auto keyboard = compositor->keyboard_layout();
       protocol::ext_zwwm_snapshot_v1_send_keyboard(*resource, keyboard.name.c_str(),
-                                                    keyboard.group);
+                                                     keyboard.group);
+    } else if (type == protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_LIVE) {
+      for (const auto& toplevel : compositor->toplevels())
+        protocol::ext_zwwm_snapshot_v1_send_toplevel(
+            *resource, high(toplevel.id), low(toplevel.id), toplevel.app_id.c_str(),
+            toplevel.title.c_str(), high(toplevel.output.value), low(toplevel.output.value),
+            toplevel.x, toplevel.y, toplevel.width, toplevel.height, toplevel.state);
+      for (const auto& tag : compositor->tags())
+        protocol::ext_zwwm_snapshot_v1_send_tag(*resource, tag.connector.c_str(),
+            high(tag.output.value), low(tag.output.value), tag.active);
+      for (const auto& camera : compositor->cameras()) {
+        const auto x = std::to_string(camera.x);
+        const auto y = std::to_string(camera.y);
+        const auto zoom = std::to_string(camera.zoom);
+        protocol::ext_zwwm_snapshot_v1_send_camera(
+            *resource, camera.connector.c_str(), high(camera.output.value), low(camera.output.value),
+            camera.tag, x.c_str(), y.c_str(), zoom.c_str(), camera.active ? 1U : 0U);
+      }
+      const auto keyboard = compositor->keyboard_layout();
+      protocol::ext_zwwm_snapshot_v1_send_keyboard(*resource, keyboard.name.c_str(), keyboard.group);
     } else {
       protocol::ext_zwwm_snapshot_v1_send_failed(*resource, "unknown snapshot type");
       return;
@@ -226,7 +247,7 @@ struct ManagerProtocol::Impl {
   };
   static void bind(zwayland::server::Client* client, void* data, std::uint32_t version, std::uint32_t id) {
     auto* self = static_cast<Impl*>(data);
-    auto* resource = client->create_resource(&protocol::ext_zwwm_manager_v1_interface, id, std::min(version, 5U));
+    auto* resource = client->create_resource(&protocol::ext_zwwm_manager_v1_interface, id, std::min(version, 6U));
     if (resource == nullptr) { client->post_no_memory(); return; }
     resource->set_data(self);
     resource->set_handler(protocol::ext_zwwm_manager_v1_handler(ManagerHandler{}));
@@ -242,7 +263,7 @@ ManagerProtocol::ManagerProtocol(zwayland::server::Display* display, CompositorS
   impl_->reload = std::move(reload);
   impl_->rebuild_shaders = std::move(rebuild_shaders);
   impl_->set_cursor = std::move(set_cursor);
-  impl_->global = display->add_global(&protocol::ext_zwwm_manager_v1_interface, 5, [data = impl_](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (Impl::bind)(&client, data, bound_version, id); });
+  impl_->global = display->add_global(&protocol::ext_zwwm_manager_v1_interface, 6, [data = impl_](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (Impl::bind)(&client, data, bound_version, id); });
   if (impl_->global == 0) { delete impl_; throw std::runtime_error("could not create manager protocol global"); }
   compositor->set_event_observer([](void* data, const char* event) {
     if (event != nullptr) static_cast<ManagerProtocol*>(data)->emit(event);

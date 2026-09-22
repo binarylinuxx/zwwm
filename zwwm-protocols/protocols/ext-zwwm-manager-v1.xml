@@ -2,7 +2,7 @@
 <protocol name="ext_zwwm_manager_v1">
   <copyright>Copyright 2026 zwwm contributors</copyright>
 
-  <interface name="ext_zwwm_manager_v1" version="5">
+  <interface name="ext_zwwm_manager_v1" version="6">
     <description summary="zwwm control and state manager">
       Provides typed compositor state snapshots, control actions, and event
       subscriptions to clients connected to the compositor Wayland socket.
@@ -16,6 +16,7 @@
       <entry name="layers" value="4"/>
       <entry name="cameras" value="5"/>
       <entry name="keyboard" value="6"/>
+      <entry name="live" value="7" since="6"/>
     </enum>
 
     <enum name="event_mask" bitfield="true">
@@ -26,6 +27,8 @@
       <entry name="layer" value="16"/>
       <entry name="output" value="32"/>
       <entry name="shutdown" value="64"/>
+      <entry name="camera" value="128" since="6"/>
+      <entry name="keyboard" value="256" since="6"/>
     </enum>
 
     <request name="destroy" type="destructor"/>

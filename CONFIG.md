@@ -598,6 +598,7 @@ zwwmctl camera
 zwwmctl camera -j
 zwwmctl keyboard
 zwwmctl keyboard -j
+zwwmctl listen
 zwwmctl dispatch focus left
 zwwmctl rebuild-switch-shaders
 zwwmctl setcursor "Bibata-Modern-Classic" 24
@@ -607,6 +608,10 @@ zwwmctl setcursor "Bibata-Modern-Classic" 24
 tag, world X, world Y, zoom level, and whether the output is active. JSON output
 returns these as named fields in a `cameras` array. Camera reporting requires
 manager protocol version 4.
+
+`listen` writes one JSON object per state update. Each object contains the live
+client list, active tags, camera position and zoom for every output, and the
+effective keyboard layout.
 
 `keyboard` reports the effective XKB layout name and zero-based group. It
 requires manager protocol version 5.

@@ -33,7 +33,9 @@
 #include <linux/input-event-codes.h>
 
 #include "zwwm/layout/master_stack.hpp"
+#include "zwwm/layout/canvas.hpp"
 #include "zwwm/runtime_config.hpp"
+#include "zwwm/camera.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -395,26 +397,7 @@ std::pair<std::int64_t, std::int64_t> snap_canvas_window(
 #endif
   }
   return layout::snap_canvas_window(x, y, width, height, candidates,
-                                    observer->config->layout.inner_gap, viewport);
-}
-void zoom_canvas(Observer* observer, SeatState* seat, bool zoom_in) {
-  if (observer == nullptr || seat == nullptr) return;
-  auto* output = output_state(observer, observer->active_output);
-  if (output == nullptr) return;
-  auto& viewport = output->canvas_viewports[output->active_tag - 1];
-  const Rect work = output_work(observer, output->info.id);
-  const double center_x = viewport.x + work.width / (2.0 * viewport.scale);
-  const double center_y = viewport.y + work.height / (2.0 * viewport.scale);
-  const double minimum = observer->config->layout.min_zoom_per_mille / 1000.0;
-  const double maximum = observer->config->layout.max_zoom_per_mille / 1000.0;
-  const double scale = std::clamp(viewport.scale * (zoom_in ? 1.1 : 1.0 / 1.1), minimum, maximum);
-  if (scale == viewport.scale) return;
-  viewport.scale = scale;
-  viewport.x = center_x - work.width / (2.0 * scale);
-  viewport.y = center_y - work.height / (2.0 * scale);
-  seat->canvas_zooming = true;
-  configure_layout(observer);
-  seat->canvas_zooming = false;
+                                     observer->config->layout.inner_gap, viewport);
 }
 Rect clamp_window(Rect rect, Rect area) {
   rect.width = std::clamp(rect.width, 1, std::max(1, area.width));
@@ -761,7 +744,7 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
       const bool state_changed = x->configured_states != states;
       x->tile_bounds = bounds;
       x->content_bounds = assigned;
-      if (observer->seat == nullptr || !observer->seat->canvas_zooming)
+      if (observer->seat == nullptr || !observer->camera.is_animating())
         send_configure(x, static_cast<std::int32_t>(client_content.size.width),
                        static_cast<std::int32_t>(client_content.size.height), states);
       if (changed || state_changed) notify_surface_tree(surface);
@@ -803,7 +786,7 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
     const bool changed = !same_rect(role->tile_bounds, bounds) || !same_rect(role->content_bounds, assigned);
     role->tile_bounds = bounds;
     role->content_bounds = assigned;
-    const bool camera_only = observer->seat != nullptr && observer->seat->canvas_zooming;
+    const bool camera_only = observer->seat != nullptr && observer->camera.is_animating();
     if (changed && !camera_only && role->runtime != nullptr && role->runtime->connection != nullptr) {
       const std::array<std::uint32_t, 4> values{
           static_cast<std::uint32_t>(assigned.x), static_cast<std::uint32_t>(assigned.y),
@@ -1118,7 +1101,7 @@ void notify_surface(SurfaceState* s) {
   const bool canvas_interaction = endless_canvas(s->observer) && seat != nullptr &&
       (seat->canvas_panning || seat->interactive != nullptr);
   view.suppress_geometry_animation = view.toplevel && seat != nullptr &&
-      (seat->canvas_zooming || (seat->interactive != nullptr && !canvas_interaction));
+      (s->observer->camera.is_animating() || (seat->interactive != nullptr && !canvas_interaction));
   view.track_geometry_animation = view.toplevel && canvas_interaction;
   absolute_position(s, &view.x, &view.y);
     if (auto* xdg_root = root(s)->xdg_surface;
@@ -1291,6 +1274,7 @@ void notify_toplevel_closed(Observer* observer, zwayland::server::Resource* topl
 void switch_active_tag(Observer* observer, OutputId output_id, std::uint8_t tag) {
   auto* output = output_state(observer, output_id);
   if (output == nullptr || output->active_tag == tag) return;
+  if (observer->camera_output == output_id) observer->camera.stop();
   const std::int8_t direction = tag > output->active_tag ? 1 : -1;
   output->active_tag = tag;
   if (observer->event_callback != nullptr) observer->event_callback(observer->event_data, "tag");
@@ -2545,7 +2529,15 @@ void bind_decoration_manager(zwayland::server::Client* client, void*, std::uint3
 }  // namespace detail
 using namespace detail;
 struct CompositorServer::Impl { std::uint32_t compositor = 0, shm = 0, wm = 0, dialog_manager = 0, decoration_manager = 0, cursor_shape_manager = 0, pointer_constraints = 0, relative_pointer_manager = 0, seat = 0, sub = 0, dmabuf = 0, data_device_manager = 0, data_control_manager = 0, wlr_data_control_manager = 0, session_lock_manager = 0, tags_manager = 0; std::shared_ptr<const RuntimeConfig> config; Observer observer; TagsState tags; std::vector<SurfaceState*> surfaces; SeatState seat_state; DmabufState dmabuf_state; std::vector<std::unique_ptr<OutputState>> outputs; std::vector<std::unique_ptr<OutputState>> retired_outputs; OutputId active_output; ~Impl() { const auto release = [this](auto& list) { for (auto& state : list) { if (state->global != 0) seat_state.display.display->destroy_global(state->global); for (auto* resource : state->resources) resource->userdata.reset(); } }; release(outputs); release(retired_outputs); } };
- CompositorServer::CompositorServer(zwayland::server::Display* d, std::shared_ptr<const RuntimeConfig> config) : impl_(new Impl) { impl_->config = std::move(config); if (impl_->config == nullptr) { delete impl_; impl_ = nullptr; throw std::invalid_argument("runtime configuration is required"); } impl_->observer.surfaces = &impl_->surfaces; impl_->observer.seat = &impl_->seat_state; impl_->observer.config = impl_->config.get(); impl_->observer.tags = &impl_->tags; impl_->seat_state.display.observer = &impl_->observer; impl_->seat_state.display = d; if (!initialize_xkb(&impl_->seat_state)) { release_xkb(&impl_->seat_state); delete impl_; impl_ = nullptr; throw std::runtime_error("could not initialize XKB for seat0"); } impl_->compositor = d->add_global(&protocol::wl_compositor_interface, kCompositorVersion, [data = &impl_->observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_comp)(&client, data, bound_version, id); }); impl_->shm = d->add_global(&protocol::wl_shm_interface, kShmVersion, [data = this](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_shm)(&client, data, bound_version, id); }); impl_->wm = d->add_global(&protocol::xdg_wm_base_interface, kXdgVersion, [data = this](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_wm)(&client, data, bound_version, id); }); impl_->tags_manager = d->add_global(&protocol::zwwm_tags_v1_interface, 1, [data = &impl_->observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_tags)(&client, data, bound_version, id); }); impl_->decoration_manager = d->add_global(&protocol::zxdg_decoration_manager_v1_interface, kDecorationVersion, [data = this](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_decoration_manager)(&client, data, bound_version, id); }); impl_->cursor_shape_manager = d->add_global(&protocol::wp_cursor_shape_manager_v1_interface, 1, [data = &impl_->observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_cursor_shape_manager)(&client, data, bound_version, id); }); impl_->pointer_constraints = d->add_global(&protocol::zwp_pointer_constraints_v1_interface, 1, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_pointer_constraints)(&client, data, bound_version, id); }); impl_->seat = d->add_global(&protocol::wl_seat_interface, kSeatVersion, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_seat)(&client, data, bound_version, id); }); impl_->sub = d->add_global(&protocol::wl_subcompositor_interface, kSubcompositorVersion, [data = this](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_sub)(&client, data, bound_version, id); }); impl_->data_device_manager = d->add_global(&protocol::wl_data_device_manager_interface, kDataDeviceManagerVersion, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_data_device_manager)(&client, data, bound_version, id); }); impl_->data_control_manager = d->add_global(&protocol::zwwm_data_control_manager_v1_interface, 1, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_data_control_manager)(&client, data, bound_version, id); }); impl_->wlr_data_control_manager = d->add_global(&protocol::zwlr_data_control_manager_v1_interface, 2, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_wlr_data_control_manager)(&client, data, bound_version, id); }); }
+ CompositorServer::CompositorServer(zwayland::server::Display* d, std::shared_ptr<const RuntimeConfig> config) : impl_(new Impl) { impl_->config = std::move(config); if (impl_->config == nullptr) { delete impl_; impl_ = nullptr; throw std::invalid_argument("runtime configuration is required"); } impl_->observer.surfaces = &impl_->surfaces;
+  impl_->observer.seat = &impl_->seat_state;
+  impl_->observer.config = impl_->config.get();
+  impl_->observer.tags = &impl_->tags;
+  impl_->observer.camera.set_config({
+      .min_zoom = impl_->config->layout.min_zoom_per_mille / 1000.0,
+      .max_zoom = impl_->config->layout.max_zoom_per_mille / 1000.0,
+      .zoom_step = 1.1
+  }); impl_->seat_state.display.observer = &impl_->observer; impl_->seat_state.display = d; if (!initialize_xkb(&impl_->seat_state)) { release_xkb(&impl_->seat_state); delete impl_; impl_ = nullptr; throw std::runtime_error("could not initialize XKB for seat0"); } impl_->compositor = d->add_global(&protocol::wl_compositor_interface, kCompositorVersion, [data = &impl_->observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_comp)(&client, data, bound_version, id); }); impl_->shm = d->add_global(&protocol::wl_shm_interface, kShmVersion, [data = this](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_shm)(&client, data, bound_version, id); }); impl_->wm = d->add_global(&protocol::xdg_wm_base_interface, kXdgVersion, [data = this](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_wm)(&client, data, bound_version, id); }); impl_->tags_manager = d->add_global(&protocol::zwwm_tags_v1_interface, 1, [data = &impl_->observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_tags)(&client, data, bound_version, id); }); impl_->decoration_manager = d->add_global(&protocol::zxdg_decoration_manager_v1_interface, kDecorationVersion, [data = this](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_decoration_manager)(&client, data, bound_version, id); }); impl_->cursor_shape_manager = d->add_global(&protocol::wp_cursor_shape_manager_v1_interface, 1, [data = &impl_->observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_cursor_shape_manager)(&client, data, bound_version, id); }); impl_->pointer_constraints = d->add_global(&protocol::zwp_pointer_constraints_v1_interface, 1, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_pointer_constraints)(&client, data, bound_version, id); }); impl_->seat = d->add_global(&protocol::wl_seat_interface, kSeatVersion, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_seat)(&client, data, bound_version, id); }); impl_->sub = d->add_global(&protocol::wl_subcompositor_interface, kSubcompositorVersion, [data = this](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_sub)(&client, data, bound_version, id); }); impl_->data_device_manager = d->add_global(&protocol::wl_data_device_manager_interface, kDataDeviceManagerVersion, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_data_device_manager)(&client, data, bound_version, id); }); impl_->data_control_manager = d->add_global(&protocol::zwwm_data_control_manager_v1_interface, 1, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_data_control_manager)(&client, data, bound_version, id); }); impl_->wlr_data_control_manager = d->add_global(&protocol::zwlr_data_control_manager_v1_interface, 2, [data = &impl_->seat_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_wlr_data_control_manager)(&client, data, bound_version, id); }); }
  CompositorServer::~CompositorServer() { while (!impl_->seat_state.constraints.empty()) impl_->seat_state.constraints.back()->resource->destroy(); while (!impl_->tags.clients.empty()) impl_->tags.clients.back()->resource->destroy(); while (!impl_->seat_state.data_offers.empty()) impl_->seat_state.data_offers.back()->resource->destroy(); while (!impl_->seat_state.data_control_devices.empty()) impl_->seat_state.data_control_devices.back()->resource->destroy(); while (!impl_->seat_state.data_devices.empty()) impl_->seat_state.data_devices.back()->resource->destroy(); while (!impl_->seat_state.data_sources.empty()) impl_->seat_state.data_sources.back()->resource->destroy(); for (std::uint32_t global : {impl_->dmabuf, impl_->wlr_data_control_manager, impl_->data_control_manager, impl_->data_device_manager, impl_->sub, impl_->seat, impl_->pointer_constraints, impl_->cursor_shape_manager, impl_->decoration_manager, impl_->tags_manager, impl_->dialog_manager, impl_->wm, impl_->shm, impl_->compositor}) if (global != 0) impl_->seat_state.display.display->destroy_global(global); release_xkb(&impl_->seat_state); delete impl_; }
  CompositorServer::CompositorServer(zwayland::server::Display* d, std::shared_ptr<const RuntimeConfig> config,
                                     zwayland::server::EventLoop* event_loop)
@@ -2571,6 +2563,11 @@ void CompositorServer::set_config(std::shared_ptr<const RuntimeConfig> config) {
   if (!update_xkb(&impl_->seat_state, config->keyboard)) return;
   impl_->config = std::move(config);
   impl_->observer.config = impl_->config.get();
+  impl_->observer.camera.set_config({
+      .min_zoom = impl_->config->layout.min_zoom_per_mille / 1000.0,
+      .max_zoom = impl_->config->layout.max_zoom_per_mille / 1000.0,
+      .zoom_step = 1.1
+  });
   publish_keymap(&impl_->seat_state);
   auto outputs = this->outputs();
   for (auto& output : outputs) {
@@ -2605,6 +2602,7 @@ void CompositorServer::set_config(std::shared_ptr<const RuntimeConfig> config) {
   };
   for (auto* surface : impl_->surfaces) if (surface->xdg_surface != nullptr && surface->xdg_surface->toplevel != nullptr) reconfigure_popups(reconfigure_popups, surface);
   if (impl_->observer.event_callback != nullptr) impl_->observer.event_callback(impl_->observer.event_data, "config");
+  if (impl_->observer.event_callback != nullptr) impl_->observer.event_callback(impl_->observer.event_data, "keyboard");
 }
 void CompositorServer::set_output_size(std::uint32_t width, std::uint32_t height, std::uint32_t refresh_millihz) {
   if (width == 0 || height == 0 || width > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || height > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) return;
@@ -3077,6 +3075,20 @@ bool CompositorServer::dispatch_action(const std::string& action, const std::str
 void CompositorServer::set_dmabuf_feedback(std::vector<std::pair<std::uint32_t, std::uint64_t>> formats, std::optional<dev_t> main_device) { std::sort(formats.begin(), formats.end()); formats.erase(std::unique(formats.begin(), formats.end()), formats.end()); if (formats.size() > std::numeric_limits<std::uint16_t>::max()) formats.resize(std::numeric_limits<std::uint16_t>::max()); impl_->dmabuf_state = {std::move(formats), main_device}; if (impl_->dmabuf == 0 && !impl_->dmabuf_state.formats.empty()) { const auto version = impl_->dmabuf_state.main_device.has_value() ? 4U : 3U; impl_->dmabuf = impl_->seat_state.display->add_global(&protocol::zwp_linux_dmabuf_v1_interface, version, [data = &impl_->dmabuf_state](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_dmabuf)(&client, data, bound_version, id); }); } }
 void CompositorServer::notify_frame_presented(OutputId output) {
   const auto now = timestamp_ms();
+  if (impl_->observer.camera.is_animating() &&
+      (!output || output == impl_->observer.camera_output)) {
+    auto* state = output_state(&impl_->observer, impl_->observer.camera_output);
+    if (state == nullptr || impl_->observer.camera_tag < 1 || impl_->observer.camera_tag > 9) {
+      impl_->observer.camera.stop();
+    } else {
+      auto& viewport = state->canvas_viewports[impl_->observer.camera_tag - 1];
+      const Rect work = output_work(&impl_->observer, state->info.id);
+      if (impl_->observer.camera.tick(viewport, work.width, work.height, now))
+        configure_layout(&impl_->observer);
+      if (impl_->observer.event_callback != nullptr)
+        impl_->observer.event_callback(impl_->observer.event_data, "camera");
+    }
+  }
   auto* lock = impl_->seat_state.session_lock;
   for (auto* surface : impl_->surfaces) {
     if (!*surface->alive) continue;
@@ -3399,6 +3411,8 @@ bool CompositorServer::pointer_pan_motion(double dx, double dy) {
   viewport.x -= dx / viewport.scale;
   viewport.y -= dy / viewport.scale;
   configure_layout(&impl_->observer);
+  if (impl_->observer.event_callback != nullptr)
+    impl_->observer.event_callback(impl_->observer.event_data, "camera");
   sync_pointer_position(&seat);
   return true;
 }
@@ -3426,6 +3440,8 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
       viewport.x = impl_->seat_state.canvas_pan_start.x - dx;
       viewport.y = impl_->seat_state.canvas_pan_start.y - dy;
       configure_layout(&impl_->observer);
+      if (impl_->observer.event_callback != nullptr)
+        impl_->observer.event_callback(impl_->observer.event_data, "camera");
       impl_->seat_state.pointer_x = x;
       impl_->seat_state.pointer_y = y;
       sync_pointer_position(&impl_->seat_state);
@@ -3648,6 +3664,7 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
       seat.session_lock == nullptr && endless_canvas(&impl_->observer)) {
     auto* output = output_state(&impl_->observer, impl_->active_output);
     if (output != nullptr) {
+      impl_->observer.camera.stop();
       seat.compositor_interactive = true;
       seat.canvas_panning = true;
       seat.cursor_override_shape = "grabbing";
@@ -3846,7 +3863,23 @@ void CompositorServer::pointer_axis(std::uint32_t time, std::uint32_t axis, doub
     for (const auto& binding : impl_->config->keybindings) {
       if (binding.key != key || !binding_modifiers_match(binding, seat)) continue;
       if (binding.action == KeyAction::zoomin || binding.action == KeyAction::zoomout) {
-        zoom_canvas(&impl_->observer, &seat, binding.action == KeyAction::zoomin);
+        auto* output = output_state(&impl_->observer, impl_->observer.active_output);
+        if (output == nullptr) return;
+        const auto tag = output->active_tag;
+        if (impl_->observer.camera_output != output->info.id ||
+            impl_->observer.camera_tag != tag) {
+          impl_->observer.camera.stop();
+          impl_->observer.camera_output = output->info.id;
+          impl_->observer.camera_tag = tag;
+        }
+        auto& viewport = output->canvas_viewports[tag - 1];
+        const Rect work = output_work(&impl_->observer, output->info.id);
+        if (impl_->observer.camera.zoom_by_steps(
+                viewport, work.width, work.height,
+                binding.action == KeyAction::zoomin ? 1 : -1, timestamp_ms()))
+          configure_layout(&impl_->observer);
+        if (impl_->observer.event_callback != nullptr)
+          impl_->observer.event_callback(impl_->observer.event_data, "camera");
         return;
       }
     }
@@ -3876,7 +3909,13 @@ void CompositorServer::keyboard_key(std::uint32_t time, std::uint32_t key, std::
   const auto existing = std::find(seat.pressed_keys.begin(), seat.pressed_keys.end(), key);
   if ((state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED && existing != seat.pressed_keys.end()) || (state == protocol::WL_KEYBOARD_KEY_STATE_RELEASED && existing == seat.pressed_keys.end())) return;
   if (state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED) seat.pressed_keys.push_back(key); else seat.pressed_keys.erase(existing);
+  const auto old_group = seat.xkb_state_handle == nullptr ? 0U :
+      xkb_state_serialize_layout(seat.xkb_state_handle, XKB_STATE_LAYOUT_EFFECTIVE);
   if (seat.xkb_state_handle != nullptr && key <= std::numeric_limits<xkb_keycode_t>::max() - 8) xkb_state_update_key(seat.xkb_state_handle, static_cast<xkb_keycode_t>(key + 8), state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED ? XKB_KEY_DOWN : XKB_KEY_UP);
+  const auto new_group = seat.xkb_state_handle == nullptr ? 0U :
+      xkb_state_serialize_layout(seat.xkb_state_handle, XKB_STATE_LAYOUT_EFFECTIVE);
+  if (old_group != new_group && impl_->observer.event_callback != nullptr)
+    impl_->observer.event_callback(impl_->observer.event_data, "keyboard");
   if (state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED && seat.session_lock == nullptr) {
     for (const auto& binding : impl_->config->keybindings) {
       if (!binding_matches(binding, seat, key)) continue;
@@ -3973,7 +4012,18 @@ void CompositorServer::keyboard_key(std::uint32_t time, std::uint32_t key, std::
   remember_serial(seat, client, serial);
   send_modifiers(seat);
 }
-void CompositorServer::keyboard_modifiers(std::uint32_t depressed, std::uint32_t latched, std::uint32_t locked, std::uint32_t group) { auto& seat = impl_->seat_state; if (seat.xkb_state_handle != nullptr) xkb_state_update_mask(seat.xkb_state_handle, depressed, latched, locked, 0, 0, group); send_modifiers(seat); }
+void CompositorServer::keyboard_modifiers(std::uint32_t depressed, std::uint32_t latched, std::uint32_t locked, std::uint32_t group) {
+  auto& seat = impl_->seat_state;
+  const auto old_group = seat.xkb_state_handle == nullptr ? 0U :
+      xkb_state_serialize_layout(seat.xkb_state_handle, XKB_STATE_LAYOUT_EFFECTIVE);
+  if (seat.xkb_state_handle != nullptr)
+    xkb_state_update_mask(seat.xkb_state_handle, depressed, latched, locked, 0, 0, group);
+  const auto new_group = seat.xkb_state_handle == nullptr ? 0U :
+      xkb_state_serialize_layout(seat.xkb_state_handle, XKB_STATE_LAYOUT_EFFECTIVE);
+  if (old_group != new_group && impl_->observer.event_callback != nullptr)
+    impl_->observer.event_callback(impl_->observer.event_data, "keyboard");
+  send_modifiers(seat);
+}
 void CompositorServer::keyboard_repeat_info(std::int32_t rate, std::int32_t delay) { if (rate < 0 || delay < 0) return; auto& seat = impl_->seat_state; seat.repeat_rate = rate; seat.repeat_delay = delay; for (auto* resource : seat.keyboards) if (resource->version >= 4) protocol::wl_keyboard_send_repeat_info(*resource, rate, delay); }
 void CompositorServer::input_reset(bool preserve_keyboard_focus) { auto& seat = impl_->seat_state; cancel_drag(&seat); end_interactive(&seat); seat.pressed_buttons.clear(); seat.pressed_keys.clear(); seat.pointer_grab = nullptr; seat.popup_grab = nullptr; seat.button_client = nullptr; seat.button_serial = 0; seat.button = 0; set_pointer_focus(&seat, nullptr, 0, 0); if (!preserve_keyboard_focus) set_keyboard_focus(&seat, nullptr); if (seat.xkb_state_handle != nullptr) xkb_state_update_mask(seat.xkb_state_handle, 0, 0, 0, 0, 0, 0); if (preserve_keyboard_focus) send_modifiers(seat); }
 }  // namespace zwwm

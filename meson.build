@@ -6,6 +6,12 @@ project(
   default_options: ['cpp_std=c++23', 'cpp_eh=default', 'buildtype=release'],
 )
 
+c_compiler = meson.get_compiler('c')
+cpp_compiler = meson.get_compiler('cpp')
+if c_compiler.get_id() != 'clang' or cpp_compiler.get_id() != 'clang'
+  error('zwwm requires Clang for both C and C++')
+endif
+
 strict_cpp = ['-Wall', '-Wextra', '-Wpedantic', '-Werror']
 runtime_cpp = ['-Wall', '-Wextra', '-Wpedantic']
 version_cpp = ['-DZWWM_VERSION="' + meson.project_version() + '"']
@@ -265,6 +271,17 @@ zwwm_focus_fibonacci_dep = declare_dependency(
   dependencies: zwwm_master_stack_dep,
 )
 
+zwwm_camera = static_library(
+  'zwwm_camera',
+  'zwwm/src/camera.cpp',
+  include_directories: zwwm_inc,
+  cpp_args: strict_cpp,
+)
+zwwm_camera_dep = declare_dependency(
+  link_with: zwwm_camera,
+  include_directories: zwwm_inc,
+)
+
 compositor_sources = files(
   'zwwm/src/compositor_server.cpp',
   'zwwm/src/compositor_server_buffers.cpp',
@@ -283,6 +300,7 @@ compositor_deps = [
   zwwm_master_stack_dep,
   zwwm_canvas_dep,
   zwwm_focus_fibonacci_dep,
+  zwwm_camera_dep,
   zwwm_renderer_dep,
 ]
 compositor_args = strict_cpp

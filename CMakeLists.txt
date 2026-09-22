@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.25)
 
 project(zwwm VERSION 0.1.1 LANGUAGES C CXX)
 
+if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang" OR
+   NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  message(FATAL_ERROR "zwwm requires Clang for both C and C++")
+endif()
+
 set(ZWWM_VERSION "0.1.1-alpha.1")
 
 set(CMAKE_CXX_STANDARD 23)

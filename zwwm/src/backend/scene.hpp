@@ -11,6 +11,13 @@ namespace zwwm::backend_scene {
 
 struct WindowGeometry { int x; int y; int width; int height; };
 
+inline bool intersects(renderer::Rect left, renderer::Rect right) {
+  return static_cast<std::int64_t>(left.origin.x) + left.size.width > right.origin.x &&
+         static_cast<std::int64_t>(right.origin.x) + right.size.width > left.origin.x &&
+         static_cast<std::int64_t>(left.origin.y) + left.size.height > right.origin.y &&
+         static_cast<std::int64_t>(right.origin.y) + right.size.height > left.origin.y;
+}
+
 template <typename Surface>
 renderer::Rect base_assigned_tile(const Surface& surface) {
   return {{surface.assigned_tile_x, surface.assigned_tile_y},

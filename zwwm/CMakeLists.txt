@@ -42,6 +42,11 @@ target_link_libraries(zwwm_animation PUBLIC zwwm::renderer)
 target_compile_options(zwwm_animation PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_library(zwwm::animation ALIAS zwwm_animation)
 
+add_library(zwwm_camera STATIC src/camera.cpp)
+target_include_directories(zwwm_camera PUBLIC include)
+target_compile_options(zwwm_camera PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_library(zwwm::camera ALIAS zwwm_camera)
+
 add_library(zwwm_runtime_config STATIC src/runtime_config.cpp)
 target_include_directories(zwwm_runtime_config PUBLIC include)
 target_link_libraries(zwwm_runtime_config PUBLIC zwayland-server PkgConfig::XKBCOMMON zwwm::lang zwwm::master_stack zwwm::animation)
@@ -62,7 +67,7 @@ add_library(zwwm_compositor STATIC
   src/compositor_server_surface_extensions.cpp
 )
 target_include_directories(zwwm_compositor PUBLIC include)
-target_link_libraries(zwwm_compositor PUBLIC zwayland-server PkgConfig::XKBCOMMON zwwm::protocol_metadata zwwm::runtime_config zwwm::master_stack zwwm::canvas zwwm::focus_fibonacci zwwm::renderer)
+target_link_libraries(zwwm_compositor PUBLIC zwayland-server PkgConfig::XKBCOMMON zwwm::protocol_metadata zwwm::runtime_config zwwm::master_stack zwwm::canvas zwwm::focus_fibonacci zwwm::camera zwwm::renderer)
 if(XWAYLAND_ENABLE)
   target_sources(zwwm_compositor PRIVATE
     src/compositor_server_xwayland.cpp
