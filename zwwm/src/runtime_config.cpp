@@ -49,6 +49,10 @@ bool bootstrap_user_config(const std::filesystem::path& config) {
                                shader_dir / name) && !std::filesystem::exists(shader_dir / name))
       return false;
   }
+  if (!install_default_file(std::filesystem::path(ZWWM_DATA_DIR) / "background.png",
+                            config.parent_path() / "background.png") &&
+      !std::filesystem::exists(config.parent_path() / "background.png"))
+    return false;
   return install_default_file(std::filesystem::path(ZWWM_DATA_DIR) / "config.zw", config) ||
       install_default_file("/etc/xdg/zwwm/config.zw", config) || std::filesystem::exists(config);
 }
@@ -898,6 +902,9 @@ RuntimeConfigResult load_runtime_config_file(const std::string& path) {
       std::filesystem::path shader_path(shader.source);
       if (shader_path.is_relative()) shader.source = (base / shader_path).lexically_normal().string();
     }
+    std::filesystem::path background_path(mutable_config->background_image);
+    if (background_path.is_relative())
+      mutable_config->background_image = (base / background_path).lexically_normal().string();
   }
   return result;
 }
@@ -909,6 +916,7 @@ bool load_shader_sources(const RuntimeConfig& config, renderer::ShaderSources* s
   loaded.window = config.window_shader;
   loaded.border = config.border_shader;
   loaded.background = config.background_shader;
+  loaded.background_image = config.background_image;
   for (const auto& shader : config.shaders) {
     std::ifstream input(shader.source, std::ios::binary | std::ios::ate);
     if (!input) {

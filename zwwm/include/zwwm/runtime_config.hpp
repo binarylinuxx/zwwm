@@ -178,6 +178,7 @@ class RuntimeConfig {
   std::string window_shader = "window";
   std::string border_shader = "border";
   std::string background_shader = "background";
+  std::string background_image = "background.png";
   LayoutConfig layout;
   InputConfig input;
   KeyboardConfig keyboard;

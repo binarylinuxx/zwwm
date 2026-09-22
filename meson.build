@@ -171,6 +171,7 @@ egl = dependency('egl')
 gles = dependency('glesv2')
 epoxy = dependency('epoxy')
 libdrm = dependency('libdrm')
+libpng = dependency('libpng')
 renderer_inc = include_directories('zwwm-renderer/include')
 zwwm_renderer = static_library(
   'zwwm_renderer',
@@ -182,13 +183,13 @@ zwwm_renderer = static_library(
     embedded_shaders,
   ],
   include_directories: [renderer_inc, root_inc],
-  dependencies: [egl, epoxy, libdrm],
+  dependencies: [egl, epoxy, libdrm, libpng],
   cpp_args: strict_cpp,
 )
 zwwm_renderer_dep = declare_dependency(
   link_with: zwwm_renderer,
   include_directories: [renderer_inc, root_inc],
-  dependencies: [egl, epoxy, libdrm],
+  dependencies: [egl, epoxy, libdrm, libpng],
   sources: embedded_shaders,
 )
 
@@ -427,7 +428,9 @@ install_data(
   install_dir: join_paths(get_option('datadir'), 'dbus-1/services'),
 )
 install_data('zwwm/data/config.zw', install_dir: '/etc/xdg/zwwm')
+install_data('zwwm/data/background.png', install_dir: '/etc/xdg/zwwm')
 install_data('zwwm/data/config.zw', install_dir: get_option('datadir') / 'zwwm')
+install_data('zwwm/data/background.png', install_dir: get_option('datadir') / 'zwwm')
 install_data(
   'zwwm/data/shaders/window.frag',
   'zwwm/data/shaders/border.frag',

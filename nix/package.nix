@@ -15,6 +15,7 @@
 , libdrm
 , libgbm
 , libinput
+, libpng
 , libxml2
 , libxkbcommon
 , libXcursor
@@ -67,6 +68,7 @@ stdenv.mkDerivation {
     libdrm
     libgbm
     libinput
+    libpng
     libxml2
     libxkbcommon
     libXcursor

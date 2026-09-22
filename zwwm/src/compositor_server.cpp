@@ -1098,11 +1098,12 @@ void notify_surface(SurfaceState* s) {
   }
   view.stack_index = static_cast<std::uint32_t>(s->stack_order);
   const auto* seat = s->observer == nullptr ? nullptr : s->observer->seat;
-  const bool canvas_interaction = endless_canvas(s->observer) && seat != nullptr &&
-      (seat->canvas_panning || seat->interactive != nullptr);
-  view.suppress_geometry_animation = view.toplevel && seat != nullptr &&
-      (s->observer->camera.is_animating() || (seat->interactive != nullptr && !canvas_interaction));
-  view.track_geometry_animation = view.toplevel && canvas_interaction;
+  // Camera motion is already smoothed as a whole; per-window easing breaks
+  // the relative positions of snapped windows, including the final zoom frame.
+  const bool canvas_geometry = endless_canvas(s->observer) && !view.fullscreen;
+  view.suppress_geometry_animation = view.toplevel &&
+      (canvas_geometry || (seat != nullptr && seat->interactive != nullptr));
+  view.track_geometry_animation = false;
   absolute_position(s, &view.x, &view.y);
     if (auto* xdg_root = root(s)->xdg_surface;
         xdg_root != nullptr && xdg_root->toplevel != nullptr) {
@@ -3435,10 +3436,10 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
     if (output == nullptr) end_interactive(&impl_->seat_state);
     else {
       auto& viewport = output->canvas_viewports[output->active_tag - 1];
-      const auto dx = layout::canvas_world_delta(x - impl_->seat_state.interactive_pointer_x, viewport);
-      const auto dy = layout::canvas_world_delta(y - impl_->seat_state.interactive_pointer_y, viewport);
-      viewport.x = impl_->seat_state.canvas_pan_start.x - dx;
-      viewport.y = impl_->seat_state.canvas_pan_start.y - dy;
+      const double dx = static_cast<double>(x) - impl_->seat_state.pointer_x;
+      const double dy = static_cast<double>(y) - impl_->seat_state.pointer_y;
+      viewport.x -= dx / viewport.scale;
+      viewport.y -= dy / viewport.scale;
       configure_layout(&impl_->observer);
       if (impl_->observer.event_callback != nullptr)
         impl_->observer.event_callback(impl_->observer.event_data, "camera");

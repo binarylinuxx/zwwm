@@ -48,6 +48,7 @@
               libdrm
               libgbm
               libinput
+              libpng
               libxml2
               libxkbcommon
               libXcursor

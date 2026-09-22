@@ -1,13 +1,53 @@
 #include "zwwm/renderer/opengl.hpp"
 #include "shaders.hpp"
 
+#include <png.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace zwwm::renderer {
 namespace {
+
+GLuint load_png_texture(const std::string& path, std::string& error) {
+  png_image image{};
+  image.version = PNG_IMAGE_VERSION;
+  if (png_image_begin_read_from_file(&image, path.c_str()) == 0) {
+    error = "could not read background image " + path + ": " + image.message;
+    return 0;
+  }
+  image.format = PNG_FORMAT_RGBA;
+  if (image.width > static_cast<png_uint_32>(std::numeric_limits<GLsizei>::max()) ||
+      image.height > static_cast<png_uint_32>(std::numeric_limits<GLsizei>::max())) {
+    png_image_free(&image);
+    error = "background image dimensions are too large";
+    return 0;
+  }
+  std::vector<png_byte> pixels(PNG_IMAGE_SIZE(image));
+  if (png_image_finish_read(&image, nullptr, pixels.data(), 0, nullptr) == 0) {
+    error = "could not decode background image " + path + ": " + image.message;
+    png_image_free(&image);
+    return 0;
+  }
+
+  GLuint texture = 0;
+  glGenTextures(1, &texture);
+  glBindTexture(GL_TEXTURE_2D, texture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(image.width),
+               static_cast<GLsizei>(image.height), 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  png_image_free(&image);
+  return texture;
+}
 
 float rounded_rectangle_distance(float x, float y, float width, float height, float radius) {
   const float effective_radius = std::clamp(radius, 0.0F, 0.5F * std::min(width, height));
@@ -375,6 +415,11 @@ bool OpenGlRenderer::prepare_shaders(const ShaderSources& sources) {
     discard_shaders();
     return false;
   }
+  pending_wallpaper_texture_ = load_png_texture(sources.background_image, last_error_);
+  if (pending_wallpaper_texture_ == 0) {
+    discard_shaders();
+    return false;
+  }
   pending_window_shader_ = sources.window;
   pending_border_shader_ = sources.border;
   pending_background_shader_ = sources.background;
@@ -392,6 +437,8 @@ void OpenGlRenderer::commit_shaders() {
   window_shader_ = std::move(pending_window_shader_);
   border_shader_ = std::move(pending_border_shader_);
   background_shader_ = std::move(pending_background_shader_);
+  if (wallpaper_texture_ != 0) glDeleteTextures(1, &wallpaper_texture_);
+  wallpaper_texture_ = std::exchange(pending_wallpaper_texture_, 0);
 }
 
 void OpenGlRenderer::discard_shaders() {
@@ -403,6 +450,10 @@ void OpenGlRenderer::discard_shaders() {
   pending_window_shader_.clear();
   pending_border_shader_.clear();
   pending_background_shader_.clear();
+  if (pending_wallpaper_texture_ != 0) {
+    glDeleteTextures(1, &pending_wallpaper_texture_);
+    pending_wallpaper_texture_ = 0;
+  }
 }
 
 void OpenGlRenderer::shutdown() {
@@ -412,6 +463,10 @@ void OpenGlRenderer::shutdown() {
     if (program.program != 0) glDeleteProgram(program.program);
   }
   custom_programs_.clear();
+  if (wallpaper_texture_ != 0) {
+    glDeleteTextures(1, &wallpaper_texture_);
+    wallpaper_texture_ = 0;
+  }
   if (!kawase_textures_.empty()) {
     glDeleteTextures(static_cast<GLsizei>(kawase_textures_.size()), kawase_textures_.data());
     kawase_textures_.clear();
@@ -646,8 +701,12 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
     uniform_2f(background_program->program, "zwwm_output_size", static_cast<float>(target_size.width),
                static_cast<float>(target_size.height));
     uniform_1f(background_program->program, "zwwm_time", frame.shader_time);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, wallpaper_texture_);
+    uniform_1i(background_program->program, "zwwm_background_image", 0);
     apply_shader_values(background_program->program, background_program->values);
     glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(program_);
   }
   const auto draw_surface = [&](const DrawCall& draw, bool background_only) {

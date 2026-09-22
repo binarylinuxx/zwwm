@@ -265,8 +265,9 @@ a managed surface tree the same root coordinate system, while
 window shader demonstrates clipping and correct sampling of undersized client
 buffers without stretching.
 
-The background shader renders a full-output quad before scene surfaces, before
-any layer-shell wallpaper client. It is
+The compositor loads `background.png` beside the active configuration and uses
+it as a center-cropped, full-output default wallpaper. The background shader
+renders it before scene surfaces and before any layer-shell wallpaper client. It is
 guaranteed `zwwm_output_size` and `zwwm_time`; it may also use the vertex-stage
 varyings. Animating a shader does not itself schedule frames, so continuous
 animation requires another active repaint source such as a configured animated

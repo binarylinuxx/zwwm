@@ -29,6 +29,7 @@ struct ShaderSources {
   std::string window;
   std::string border;
   std::string background;
+  std::string background_image;
 };
 
 // Pixel-center geometry shared by ring planning tests and the shader contract.
@@ -171,6 +172,8 @@ class OpenGlRenderer {
   std::string pending_window_shader_;
   std::string pending_border_shader_;
   std::string pending_background_shader_;
+  GLuint wallpaper_texture_ = 0;
+  GLuint pending_wallpaper_texture_ = 0;
   GLint glass_rect_location_ = -1;
   GLint glass_rect_size_location_ = -1;
   GLint glass_corner_radius_location_ = -1;

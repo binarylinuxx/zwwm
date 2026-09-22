@@ -83,10 +83,6 @@ shaders = {
   background = {
     role = "background"
     source = "shaders/background.frag"
-    values = {
-      top_color = "#20242b"
-      bottom_color = "#13161b"
-    }
   }
 }
 
