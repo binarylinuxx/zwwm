@@ -144,6 +144,7 @@ void transform_frame(renderer::FramePlan& frame, const OutputConfig& output, ren
                      renderer::Point logical_origin = {}) {
   const auto scale = output.scale_per_mille / 1000.0F;
   for (auto& draw : frame.draws) {
+    backend_scene::transform_geometry(draw, output, physical, logical_origin);
     draw.bounds.origin.x -= logical_origin.x;
     draw.bounds.origin.y -= logical_origin.y;
     if (draw.clip_bounds) {
@@ -210,6 +211,7 @@ struct RuntimeBackend::DrmOutput {
     bool track_geometry_animation = false;
     float camera_scale = 1.0F;
     std::int32_t camera_center_x = 0, camera_center_y = 0;
+    double camera_offset_x = 0.0, camera_offset_y = 0.0;
     GLuint texture = 0;
     bool owns_texture = false;
     bool removed = false;
@@ -809,6 +811,8 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
         updated.camera_scale = buffer.camera_scale;
         updated.camera_center_x = buffer.camera_center_x;
         updated.camera_center_y = buffer.camera_center_y;
+        updated.camera_offset_x = buffer.camera_offset_x;
+        updated.camera_offset_y = buffer.camera_offset_y;
         if (!retain_content) {
           updated.texture = 0;
           updated.owns_texture = false;
@@ -912,6 +916,8 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
     updated.camera_scale = buffer.camera_scale;
     updated.camera_center_x = buffer.camera_center_x;
     updated.camera_center_y = buffer.camera_center_y;
+    updated.camera_offset_x = buffer.camera_offset_x;
+    updated.camera_offset_y = buffer.camera_offset_y;
     updated.focused = buffer.focused;
     updated.window_shader = buffer.window_shader;
     updated.border_shader = buffer.border_shader;
@@ -1354,6 +1360,7 @@ void RuntimeBackend::repaint(DrmOutput& card) {
       pending_border->toplevel_state = surface.focused ? 1U : 0U;
       pending_border->shader_time = frame.shader_time;
       pending_border_root = surface.root_id;
+      backend_scene::camera_geometry(*pending_border, *root, surface, tag_bounds);
     }
     const auto content = animated_content(*root, tag_bounds);
     const int content_width = static_cast<int>(content.size.width);
@@ -1398,6 +1405,7 @@ void RuntimeBackend::repaint(DrmOutput& card) {
     }
     frame.draws.back().background_blur_radius = static_cast<float>(surface.background_blur_radius);
     apply_blur_parameters(frame.draws.back(), surface.window_shader);
+    backend_scene::camera_geometry(frame.draws.back(), *root, surface, tag_bounds);
   }
   if (pending_border) frame.draws.push_back(std::move(*pending_border));
   if (error_popup_visible_ && error_popup_) {

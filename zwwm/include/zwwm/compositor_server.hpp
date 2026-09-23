@@ -67,6 +67,7 @@ struct ShmBufferView {
   float camera_scale = 1.0F;
   std::int32_t camera_center_x = 0;
   std::int32_t camera_center_y = 0;
+  double camera_offset_x = 0.0, camera_offset_y = 0.0;
   // False until the initial post-configure content commit.
   bool content_ready = true;
   // Brackets atomic publication of an output-local tag transition.

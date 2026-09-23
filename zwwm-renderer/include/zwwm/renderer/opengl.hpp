@@ -36,6 +36,21 @@ struct ShaderSources {
 [[nodiscard]] bool border_ring_contains(Size size, float corner_radius, float border_width,
                                         float x, float y);
 
+struct FloatRect {
+  struct Point { double x = 0, y = 0; } origin;
+  struct Size { double width = 0, height = 0; } size;
+  FloatRect() = default;
+  FloatRect(Point p, Size s) : origin(p), size(s) {}
+  FloatRect(Rect r) : origin{static_cast<double>(r.origin.x), static_cast<double>(r.origin.y)},
+                      size{static_cast<double>(r.size.width), static_cast<double>(r.size.height)} {}
+  bool empty() const { return size.width <= 0 || size.height <= 0; }
+};
+
+struct DrawGeometry {
+  FloatRect bounds, toplevel;
+  std::optional<FloatRect> clip, texture;
+};
+
 struct DrawCall {
   DrawCall() = default;
   DrawCall(NodeId node_id_value, Rect bounds_value, float opacity_value, std::array<float, 4> color_value,
@@ -94,6 +109,7 @@ struct DrawCall {
   Rect toplevel_bounds;
   std::uint32_t toplevel_state = 0;
   float shader_time = 0.0F;
+  std::optional<DrawGeometry> geometry;
 };
 
 struct FramePlan {

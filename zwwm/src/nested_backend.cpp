@@ -68,6 +68,7 @@ struct NestedBackend::Window {
   bool track_geometry_animation = false;
   float camera_scale = 1.0F;
   std::int32_t camera_center_x = 0, camera_center_y = 0;
+  double camera_offset_x = 0.0, camera_offset_y = 0.0;
   std::uint32_t stack_index = 0;
   std::uint64_t scene_order = 0;
   std::uint32_t scene_rank = 2;
@@ -180,6 +181,7 @@ std::uint64_t monotonic_ms() {
 void transform_frame(renderer::FramePlan& frame, const OutputConfig& output, renderer::Size physical) {
   const auto scale = output.scale_per_mille / 1000.0F;
   for (auto& draw : frame.draws) {
+    backend_scene::transform_geometry(draw, output, physical);
     draw.bounds = output.physical_bounds(draw.bounds, physical);
     if (draw.clip_bounds) draw.clip_bounds = output.physical_bounds(*draw.clip_bounds, physical);
     if (draw.texture_bounds) draw.texture_bounds = output.physical_bounds(*draw.texture_bounds, physical);
@@ -636,6 +638,8 @@ void NestedBackend::present(const ShmBufferView& buffer) {
        window.camera_scale = buffer.camera_scale;
        window.camera_center_x = buffer.camera_center_x;
        window.camera_center_y = buffer.camera_center_y;
+       window.camera_offset_x = buffer.camera_offset_x;
+       window.camera_offset_y = buffer.camera_offset_y;
         window.focused = buffer.focused;
         window.window_shader = buffer.window_shader;
         window.border_shader = buffer.border_shader;
@@ -755,6 +759,8 @@ void NestedBackend::present(const ShmBufferView& buffer) {
   window.camera_scale = buffer.camera_scale;
   window.camera_center_x = buffer.camera_center_x;
   window.camera_center_y = buffer.camera_center_y;
+  window.camera_offset_x = buffer.camera_offset_x;
+  window.camera_offset_y = buffer.camera_offset_y;
   window.focused = buffer.focused;
   window.window_shader = buffer.window_shader;
   window.border_shader = buffer.border_shader;
@@ -934,6 +940,7 @@ void NestedBackend::repaint_gpu() {
       pending_border->toplevel_state = window.focused ? 1U : 0U;
       pending_border->shader_time = frame.shader_time;
       pending_border_root = window.root_id;
+      backend_scene::camera_geometry(*pending_border, *root, window, tag_bounds);
     }
     const auto content = animated_content(*root, tag_bounds);
     const auto animation = animations_.sample(window.root_id, now);
@@ -977,6 +984,7 @@ void NestedBackend::repaint_gpu() {
     }
     frame.draws.back().background_blur_radius = static_cast<float>(window.background_blur_radius);
     apply_effect_parameters(frame.draws.back(), window.window_shader);
+    backend_scene::camera_geometry(frame.draws.back(), *root, window, tag_bounds);
   }
   if (pending_border) frame.draws.push_back(std::move(*pending_border));
   if (error_popup_visible_ && error_popup_) {

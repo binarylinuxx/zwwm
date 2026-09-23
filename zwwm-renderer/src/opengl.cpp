@@ -12,6 +12,22 @@
 namespace zwwm::renderer {
 namespace {
 
+struct RenderDraw : DrawCall {
+  FloatRect bounds, toplevel_bounds;
+  std::optional<FloatRect> clip_bounds, texture_bounds;
+  explicit RenderDraw(const DrawCall& draw) : DrawCall(draw), bounds(draw.bounds),
+      toplevel_bounds(draw.toplevel_bounds) {
+    if (draw.clip_bounds) clip_bounds = FloatRect(*draw.clip_bounds);
+    if (draw.texture_bounds) texture_bounds = FloatRect(*draw.texture_bounds);
+    if (draw.geometry) {
+      bounds = draw.geometry->bounds;
+      toplevel_bounds = draw.geometry->toplevel;
+      if (draw.geometry->clip) clip_bounds = draw.geometry->clip;
+      if (draw.geometry->texture) texture_bounds = draw.geometry->texture;
+    }
+  }
+};
+
 GLuint load_png_texture(const std::string& path, std::string& error) {
   png_image image{};
   image.version = PNG_IMAGE_VERSION;
@@ -709,7 +725,7 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(program_);
   }
-  const auto draw_surface = [&](const DrawCall& draw, bool background_only) {
+  const auto draw_surface = [&](const RenderDraw& draw, bool background_only) {
     const bool blend = background_only || !draw.opaque || draw.opacity < 1.0F || draw.corner_radius > 0.0F ||
                        draw.border_width > 0.0F || draw.clip_bounds.has_value();
     if (blend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
@@ -751,8 +767,8 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
       glUniform4f(clip_rect_location_, static_cast<float>(draw.clip_bounds->origin.x), static_cast<float>(draw.clip_bounds->origin.y),
                   static_cast<float>(draw.clip_bounds->size.width), static_cast<float>(draw.clip_bounds->size.height));
       glUniform1f(clip_radius_location_, draw.clip_radius);
-      const float clip_width = static_cast<float>(std::max(1U, draw.clip_bounds->size.width));
-      const float clip_height = static_cast<float>(std::max(1U, draw.clip_bounds->size.height));
+      const float clip_width = static_cast<float>(std::max(1.0, draw.clip_bounds->size.width));
+      const float clip_height = static_cast<float>(std::max(1.0, draw.clip_bounds->size.height));
       glUniform3f(input_to_clip_row_0_location_, pixel_width / clip_width, 0.0F,
                   (static_cast<float>(draw.bounds.origin.x - draw.clip_bounds->origin.x)) / clip_width);
       glUniform3f(input_to_clip_row_1_location_, 0.0F, pixel_height / clip_height,
@@ -768,7 +784,7 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
     }
     glDrawArrays(GL_TRIANGLES, 0, 6);
   };
-  const auto draw_glass = [&](const DrawCall& draw) {
+  const auto draw_glass = [&](const RenderDraw& draw) {
     glUseProgram(glass_program_);
     glEnable(GL_BLEND);
     const float left = (2.0F * static_cast<float>(draw.bounds.origin.x) / target_size.width) - 1.0F;
@@ -777,7 +793,7 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
     const float height = -2.0F * static_cast<float>(draw.bounds.size.height) / target_size.height;
     const float pixel_width = static_cast<float>(draw.bounds.size.width);
     const float pixel_height = static_cast<float>(draw.bounds.size.height);
-    const Rect clip = draw.clip_bounds.value_or(draw.bounds);
+    const FloatRect clip = draw.clip_bounds.value_or(draw.bounds);
     glUniform4f(glass_rect_location_, left, top, width, height);
     glUniform2f(glass_rect_size_location_, pixel_width, pixel_height);
     glUniform1f(glass_corner_radius_location_, std::min(draw.corner_radius, 0.5F * std::min(pixel_width, pixel_height)));
@@ -809,10 +825,10 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
     glUniform1i(background_texture_location_, 1);
     glUniform2f(target_size_location_, static_cast<float>(target_size.width), static_cast<float>(target_size.height));
   };
-  const auto draw_custom = [&](const DrawCall& draw, const CustomProgram& selected,
+  const auto draw_custom = [&](const RenderDraw& draw, const CustomProgram& selected,
                                bool blurred_backdrop_ready) {
     const GLuint custom_program = selected.program;
-    const Rect toplevel = draw.toplevel_bounds.empty() ? draw.bounds : draw.toplevel_bounds;
+    const FloatRect toplevel = draw.toplevel_bounds.empty() ? draw.bounds : draw.toplevel_bounds;
     const float left = (2.0F * static_cast<float>(draw.bounds.origin.x) / target_size.width) - 1.0F;
     const float top = 1.0F - (2.0F * static_cast<float>(draw.bounds.origin.y) / target_size.height);
     const float width = 2.0F * static_cast<float>(draw.bounds.size.width) / target_size.width;
@@ -841,8 +857,8 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
     uniform_1f(custom_program, "zwwm_corner_radius", draw.corner_radius);
     uniform_1f(custom_program, "zwwm_border_width", draw.border_width);
     uniform_1f(custom_program, "zwwm_clip_radius", draw.clip_radius);
-    const Rect clip = draw.clip_bounds.value_or(draw.bounds);
-    const Rect texture_rect = draw.texture_bounds.value_or(draw.bounds);
+    const FloatRect clip = draw.clip_bounds.value_or(draw.bounds);
+    const FloatRect texture_rect = draw.texture_bounds.value_or(draw.bounds);
     uniform_4f(custom_program, "zwwm_clip_rect", static_cast<float>(clip.origin.x),
                static_cast<float>(clip.origin.y), static_cast<float>(clip.size.width),
                static_cast<float>(clip.size.height));
@@ -870,7 +886,8 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
   };
   NodeId backdrop_toplevel = 0;
   bool custom_toplevel_blur_ready = false;
-  for (const DrawCall& draw : frame.draws) {
+  for (const DrawCall& item : frame.draws) {
+    const RenderDraw draw(item);
     const auto* selected_window = draw.shader_role == ShaderRole::window ?
         custom_program(draw.shader_name, window_shader_, ShaderRole::window) : nullptr;
     const auto* selected_border = draw.shader_role == ShaderRole::border ?

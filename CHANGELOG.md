@@ -2,6 +2,12 @@
 
 All notable changes to zwwm are documented here.
 
+## 0.1.3-alpha.1 - 2026-09-23
+nothing really interesting another bug fixes
+
+### Highlights
+- geometry for endless canvas now fractional preserving clusters intact without visual drift on panning zooming
+
 ## 0.1.2-alpha.1 - 2026-09-22
 
 This is intended to become zwwm's first minimally stable release: a usable

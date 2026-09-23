@@ -1098,12 +1098,11 @@ void notify_surface(SurfaceState* s) {
   }
   view.stack_index = static_cast<std::uint32_t>(s->stack_order);
   const auto* seat = s->observer == nullptr ? nullptr : s->observer->seat;
-  // Camera motion is already smoothed as a whole; per-window easing breaks
-  // the relative positions of snapped windows, including the final zoom frame.
-  const bool canvas_geometry = endless_canvas(s->observer) && !view.fullscreen;
-  view.suppress_geometry_animation = view.toplevel &&
-      (canvas_geometry || (seat != nullptr && seat->interactive != nullptr));
-  view.track_geometry_animation = false;
+  const bool canvas_interaction = endless_canvas(s->observer) && seat != nullptr &&
+      (seat->canvas_panning || seat->interactive != nullptr);
+  view.suppress_geometry_animation = view.toplevel && seat != nullptr &&
+      (s->observer->camera.is_animating() || (seat->interactive != nullptr && !canvas_interaction));
+  view.track_geometry_animation = view.toplevel && canvas_interaction;
   absolute_position(s, &view.x, &view.y);
     if (auto* xdg_root = root(s)->xdg_surface;
         xdg_root != nullptr && xdg_root->toplevel != nullptr) {
@@ -1131,6 +1130,10 @@ void notify_surface(SurfaceState* s) {
           view.camera_scale = static_cast<float>(viewport->scale);
           view.camera_center_x = work.x + work.width / 2;
           view.camera_center_y = work.y + work.height / 2;
+          view.camera_offset_x = work.x + (xdg_root->canvas_bounds.x - viewport->x) * view.camera_scale -
+              (view.camera_center_x + (tile.x - view.camera_center_x) * view.camera_scale);
+          view.camera_offset_y = work.y + (xdg_root->canvas_bounds.y - viewport->y) * view.camera_scale -
+              (view.camera_center_y + (tile.y - view.camera_center_y) * view.camera_scale);
         }
       }
       view.content_ready = xdg_root->content_ready;
@@ -1161,7 +1164,11 @@ void notify_surface(SurfaceState* s) {
            view.assigned_content_height = static_cast<std::int32_t>(content.size.height);
            view.camera_scale = static_cast<float>(viewport->scale);
            view.camera_center_x = work.x + work.width / 2;
-           view.camera_center_y = work.y + work.height / 2;
+            view.camera_center_y = work.y + work.height / 2;
+            view.camera_offset_x = work.x + (role->canvas_bounds.x - viewport->x) * view.camera_scale -
+                (view.camera_center_x + (tile.x - view.camera_center_x) * view.camera_scale);
+            view.camera_offset_y = work.y + (role->canvas_bounds.y - viewport->y) * view.camera_scale -
+                (view.camera_center_y + (tile.y - view.camera_center_y) * view.camera_scale);
          }
        }
        view.window_geometry_width = window->width;
