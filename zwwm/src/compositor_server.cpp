@@ -705,6 +705,18 @@ Rect arrange_layers(Observer* observer, OutputId output) {
   }
   return work;
 }
+void configure_camera_frame(Observer* observer, OutputId output) {
+  if (observer->callback != nullptr)
+    observer->callback(observer->data, ShmBufferView{
+        .output = output, .camera_frame = true, .window_shader = {}, .border_shader = {}});
+  observer->camera_frame = true;
+  configure_layout(observer);
+  observer->camera_frame = false;
+  if (observer->callback != nullptr)
+    observer->callback(observer->data, ShmBufferView{
+        .output = output, .camera_frame = true, .camera_frame_ready = true,
+        .window_shader = {}, .border_shader = {}});
+}
 void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
   if (observer == nullptr || observer->surfaces == nullptr) return;
   const auto border = observer->config->border_width();
@@ -744,10 +756,10 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
       const bool state_changed = x->configured_states != states;
       x->tile_bounds = bounds;
       x->content_bounds = assigned;
-      if (observer->seat == nullptr || !observer->camera.is_animating())
+      if (observer->seat == nullptr || (!observer->camera.is_animating() && !observer->camera_frame))
         send_configure(x, static_cast<std::int32_t>(client_content.size.width),
                        static_cast<std::int32_t>(client_content.size.height), states);
-      if (changed || state_changed) notify_surface_tree(surface);
+      if (changed || state_changed || observer->camera_frame) notify_surface_tree(surface);
       continue;
     }
 #ifdef ZWWM_XWAYLAND
@@ -786,7 +798,7 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
     const bool changed = !same_rect(role->tile_bounds, bounds) || !same_rect(role->content_bounds, assigned);
     role->tile_bounds = bounds;
     role->content_bounds = assigned;
-    const bool camera_only = observer->seat != nullptr && observer->camera.is_animating();
+    const bool camera_only = observer->seat != nullptr && (observer->camera.is_animating() || observer->camera_frame);
     if (changed && !camera_only && role->runtime != nullptr && role->runtime->connection != nullptr) {
       const std::array<std::uint32_t, 4> values{
           static_cast<std::uint32_t>(assigned.x), static_cast<std::uint32_t>(assigned.y),
@@ -802,7 +814,7 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
           values.data());
       xcb_flush(role->runtime->connection);
     }
-    if (changed) notify_surface_tree(surface);
+    if (changed || observer->camera_frame) notify_surface_tree(surface);
 #endif
   }
 }
@@ -1100,9 +1112,10 @@ void notify_surface(SurfaceState* s) {
   const auto* seat = s->observer == nullptr ? nullptr : s->observer->seat;
   const bool canvas_interaction = endless_canvas(s->observer) && seat != nullptr &&
       (seat->canvas_panning || seat->interactive != nullptr);
+  const bool zoom_frame = s->observer->camera.is_animating() || s->observer->camera_frame;
   view.suppress_geometry_animation = view.toplevel && seat != nullptr &&
-      (s->observer->camera.is_animating() || (seat->interactive != nullptr && !canvas_interaction));
-  view.track_geometry_animation = view.toplevel && canvas_interaction;
+      (zoom_frame || (seat->interactive != nullptr && !canvas_interaction));
+  view.track_geometry_animation = view.toplevel && canvas_interaction && !zoom_frame;
   absolute_position(s, &view.x, &view.y);
     if (auto* xdg_root = root(s)->xdg_surface;
         xdg_root != nullptr && xdg_root->toplevel != nullptr) {
@@ -1127,13 +1140,14 @@ void notify_surface(SurfaceState* s) {
           view.assigned_content_x = content.origin.x; view.assigned_content_y = content.origin.y;
           view.assigned_content_width = static_cast<std::int32_t>(content.size.width);
           view.assigned_content_height = static_cast<std::int32_t>(content.size.height);
-          view.camera_scale = static_cast<float>(viewport->scale);
+          view.camera_scale = viewport->scale;
           view.camera_center_x = work.x + work.width / 2;
           view.camera_center_y = work.y + work.height / 2;
-          view.camera_offset_x = work.x + (xdg_root->canvas_bounds.x - viewport->x) * view.camera_scale -
-              (view.camera_center_x + (tile.x - view.camera_center_x) * view.camera_scale);
-          view.camera_offset_y = work.y + (xdg_root->canvas_bounds.y - viewport->y) * view.camera_scale -
-              (view.camera_center_y + (tile.y - view.camera_center_y) * view.camera_scale);
+          view.camera_offset_x = work.x - viewport->x * viewport->scale;
+          view.camera_offset_y = work.y - viewport->y * viewport->scale;
+          view.camera_world_x = xdg_root->canvas_bounds.x;
+          view.camera_world_y = xdg_root->canvas_bounds.y;
+          view.canvas_camera = true;
         }
       }
       view.content_ready = xdg_root->content_ready;
@@ -1162,13 +1176,14 @@ void notify_surface(SurfaceState* s) {
            view.assigned_content_x = content.origin.x; view.assigned_content_y = content.origin.y;
            view.assigned_content_width = static_cast<std::int32_t>(content.size.width);
            view.assigned_content_height = static_cast<std::int32_t>(content.size.height);
-           view.camera_scale = static_cast<float>(viewport->scale);
-           view.camera_center_x = work.x + work.width / 2;
+            view.camera_scale = viewport->scale;
+            view.camera_center_x = work.x + work.width / 2;
             view.camera_center_y = work.y + work.height / 2;
-            view.camera_offset_x = work.x + (role->canvas_bounds.x - viewport->x) * view.camera_scale -
-                (view.camera_center_x + (tile.x - view.camera_center_x) * view.camera_scale);
-            view.camera_offset_y = work.y + (role->canvas_bounds.y - viewport->y) * view.camera_scale -
-                (view.camera_center_y + (tile.y - view.camera_center_y) * view.camera_scale);
+            view.camera_offset_x = work.x - viewport->x * viewport->scale;
+            view.camera_offset_y = work.y - viewport->y * viewport->scale;
+            view.camera_world_x = role->canvas_bounds.x;
+            view.camera_world_y = role->canvas_bounds.y;
+            view.canvas_camera = true;
          }
        }
        view.window_geometry_width = window->width;
@@ -3091,8 +3106,9 @@ void CompositorServer::notify_frame_presented(OutputId output) {
     } else {
       auto& viewport = state->canvas_viewports[impl_->observer.camera_tag - 1];
       const Rect work = output_work(&impl_->observer, state->info.id);
-      if (impl_->observer.camera.tick(viewport, work.width, work.height, now))
-        configure_layout(&impl_->observer);
+      if (impl_->observer.camera.tick(viewport, work.width, work.height, now)) {
+        configure_camera_frame(&impl_->observer, state->info.id);
+      }
       if (impl_->observer.event_callback != nullptr)
         impl_->observer.event_callback(impl_->observer.event_data, "camera");
     }
@@ -3884,8 +3900,9 @@ void CompositorServer::pointer_axis(std::uint32_t time, std::uint32_t axis, doub
         const Rect work = output_work(&impl_->observer, output->info.id);
         if (impl_->observer.camera.zoom_by_steps(
                 viewport, work.width, work.height,
-                binding.action == KeyAction::zoomin ? 1 : -1, timestamp_ms()))
-          configure_layout(&impl_->observer);
+                binding.action == KeyAction::zoomin ? 1 : -1, timestamp_ms())) {
+          configure_camera_frame(&impl_->observer, output->info.id);
+        }
         if (impl_->observer.event_callback != nullptr)
           impl_->observer.event_callback(impl_->observer.event_data, "camera");
         return;

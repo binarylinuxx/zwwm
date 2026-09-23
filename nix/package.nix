@@ -80,7 +80,6 @@ stdenv.mkDerivation {
   ] ++ lib.optional xwaylandSupport libxcb;
 
   cmakeFlags = [
-    (lib.cmakeBool "BUILD_TESTING" false)
     (lib.cmakeBool "XWAYLAND_ENABLE" xwaylandSupport)
   ];
 

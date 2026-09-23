@@ -52,14 +52,20 @@ template <typename Surface>
 renderer::Rect assigned_tile(const Surface& surface) {
   const auto base = base_assigned_tile(surface);
   const double scale = surface.camera_scale;
+  const double x = surface.canvas_camera ? static_cast<double>(surface.camera_world_x) :
+      base.origin.x - surface.camera_center_x;
+  const double y = surface.canvas_camera ? static_cast<double>(surface.camera_world_y) :
+      base.origin.y - surface.camera_center_y;
+  const double origin_x = surface.canvas_camera ? surface.camera_offset_x :
+      surface.camera_offset_x + surface.camera_center_x;
+  const double origin_y = surface.canvas_camera ? surface.camera_offset_y :
+      surface.camera_offset_y + surface.camera_center_y;
   const auto left = static_cast<std::int32_t>(std::lround(
-      surface.camera_offset_x + surface.camera_center_x + (base.origin.x - surface.camera_center_x) * scale));
+      origin_x + x * scale));
   const auto top = static_cast<std::int32_t>(std::lround(
-      surface.camera_offset_y + surface.camera_center_y + (base.origin.y - surface.camera_center_y) * scale));
-  const auto right = static_cast<std::int32_t>(std::lround(surface.camera_offset_x + surface.camera_center_x +
-      (static_cast<double>(base.origin.x) + base.size.width - surface.camera_center_x) * scale));
-  const auto bottom = static_cast<std::int32_t>(std::lround(surface.camera_offset_y + surface.camera_center_y +
-      (static_cast<double>(base.origin.y) + base.size.height - surface.camera_center_y) * scale));
+      origin_y + y * scale));
+  const auto right = static_cast<std::int32_t>(std::lround(origin_x + (x + base.size.width) * scale));
+  const auto bottom = static_cast<std::int32_t>(std::lround(origin_y + (y + base.size.height) * scale));
   return {{left, top},
           {static_cast<std::uint32_t>(std::max<std::int64_t>(1, static_cast<std::int64_t>(right) - left)),
            static_cast<std::uint32_t>(std::max<std::int64_t>(1, static_cast<std::int64_t>(bottom) - top))}};
@@ -120,7 +126,7 @@ std::array<float, 4> source_uv(const WindowGeometry& geometry, const Surface& su
 template <typename Surface>
 void camera_geometry(renderer::DrawCall& draw, const Surface& root, const Surface& surface,
                      renderer::Rect sampled) {
-  if (root.camera_scale == 1.0F && root.camera_offset_x == 0.0 && root.camera_offset_y == 0.0) return;
+  if (!root.canvas_camera) return;
   const auto target = assigned_tile(root);
   if (root.fullscreen || sampled.origin.x != target.origin.x || sampled.origin.y != target.origin.y ||
       sampled.size.width != target.size.width || sampled.size.height != target.size.height) return;
@@ -134,8 +140,8 @@ void camera_geometry(renderer::DrawCall& draw, const Surface& root, const Surfac
     draw.clip_radius *= correction;
   }
   const auto project = [&](double x, double y, double w, double h) -> renderer::FloatRect {
-    return {{root.camera_offset_x + root.camera_center_x + (x - root.camera_center_x) * scale,
-             root.camera_offset_y + root.camera_center_y + (y - root.camera_center_y) * scale},
+    return {{root.camera_offset_x + (root.camera_world_x + (x - root.assigned_tile_x)) * scale,
+             root.camera_offset_y + (root.camera_world_y + (y - root.assigned_tile_y)) * scale},
             {w * scale, h * scale}};
   };
   renderer::DrawGeometry precise;

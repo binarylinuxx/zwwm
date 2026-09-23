@@ -95,6 +95,7 @@ struct Observer {
   std::int32_t physical_width = 960, physical_height = 540;
   std::uint32_t refresh_millihz = 60000;
   zwwm::Camera camera;
+  bool camera_frame = false;
   OutputId camera_output;
   std::uint8_t camera_tag = 0;
 };

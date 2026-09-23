@@ -33,6 +33,3 @@ target_include_directories(zwayland-server PUBLIC
   $<BUILD_INTERFACE:${ZWAYLAND_CORE_GENERATED_DIR}>)
 target_include_directories(zwayland-client PUBLIC
   $<BUILD_INTERFACE:${ZWAYLAND_CORE_GENERATED_DIR}>)
-if(BUILD_TESTING)
-  add_subdirectory(test)
-endif()

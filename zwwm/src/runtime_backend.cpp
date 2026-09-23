@@ -209,9 +209,11 @@ struct RuntimeBackend::DrmOutput {
     bool content_ready = false;
     bool suppress_geometry_animation = false;
     bool track_geometry_animation = false;
-    float camera_scale = 1.0F;
+    double camera_scale = 1.0;
     std::int32_t camera_center_x = 0, camera_center_y = 0;
     double camera_offset_x = 0.0, camera_offset_y = 0.0;
+    std::int64_t camera_world_x = 0, camera_world_y = 0;
+    bool canvas_camera = false;
     GLuint texture = 0;
     bool owns_texture = false;
     bool removed = false;
@@ -227,6 +229,7 @@ struct RuntimeBackend::DrmOutput {
   EGLSurface egl_surface = EGL_NO_SURFACE;
   std::vector<ShmTexture> shm_textures;
   bool tag_transition_preparing = false;
+  bool camera_frame_preparing = false;
   std::uint32_t connector_id = 0;
   OutputInfo output;
   std::uint32_t crtc_id = 0;
@@ -753,6 +756,11 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
         eglMakeCurrent(device->egl_display, card->egl_surface, card->egl_surface, device->egl_context) != EGL_TRUE) {
       continue;
     }
+    if (buffer.camera_frame) {
+      card->camera_frame_preparing = !buffer.camera_frame_ready;
+      if (buffer.camera_frame_ready) repaint(*card);
+      continue;
+    }
     if (buffer.tag_transition) {
       if (buffer.tag_transition_ready) {
         card->tag_transition_preparing = false;
@@ -813,6 +821,9 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
         updated.camera_center_y = buffer.camera_center_y;
         updated.camera_offset_x = buffer.camera_offset_x;
         updated.camera_offset_y = buffer.camera_offset_y;
+        updated.camera_world_x = buffer.camera_world_x;
+        updated.camera_world_y = buffer.camera_world_y;
+        updated.canvas_camera = buffer.canvas_camera;
         if (!retain_content) {
           updated.texture = 0;
           updated.owns_texture = false;
@@ -861,7 +872,7 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
           card->shm_textures.erase(surface);
         }
       }
-      if (!card->tag_transition_preparing) repaint(*card);
+      if (!card->tag_transition_preparing && !card->camera_frame_preparing) repaint(*card);
       continue;
     }
     if (buffer.width <= 0 || buffer.height <= 0 || buffer.width > std::numeric_limits<std::int32_t>::max() / 4 ||
@@ -918,6 +929,9 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
     updated.camera_center_y = buffer.camera_center_y;
     updated.camera_offset_x = buffer.camera_offset_x;
     updated.camera_offset_y = buffer.camera_offset_y;
+    updated.camera_world_x = buffer.camera_world_x;
+    updated.camera_world_y = buffer.camera_world_y;
+    updated.canvas_camera = buffer.canvas_camera;
     updated.focused = buffer.focused;
     updated.window_shader = buffer.window_shader;
     updated.border_shader = buffer.border_shader;
@@ -975,7 +989,7 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
       return std::tie(left.scene_rank, left.layer_priority, left.root_order, left.tree_order) <
              std::tie(right.scene_rank, right.layer_priority, right.root_order, right.tree_order);
     });
-    if (!card->tag_transition_preparing) repaint(*card);
+    if (!card->tag_transition_preparing && !card->camera_frame_preparing) repaint(*card);
   }
   if (buffer.pixels == nullptr && buffer.dmabuf == nullptr && !buffer.toplevel) {
     for (auto& device : devices_) {

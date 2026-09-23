@@ -168,7 +168,11 @@ void AnimationSystem::update(std::span<const AnimationTarget> targets, std::uint
     state.present = true;
     state.target = target.bounds;
     state.target_opacity = 1.0F;
-    if (target.track && (changed || state.transition != Transition::tracking)) {
+    if (!target.animate && !target.track && state.transition == Transition::tracking) {
+      state.from = target.bounds;
+      state.from_opacity = current.opacity;
+      state.transition = Transition::idle;
+    } else if (target.track && (changed || state.transition != Transition::tracking)) {
       state.from = current.bounds;
       state.from_opacity = current.opacity;
       state.started_ms = now_ms;

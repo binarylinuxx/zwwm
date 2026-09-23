@@ -66,9 +66,11 @@ struct NestedBackend::Window {
   bool content_ready = false;
   bool suppress_geometry_animation = false;
   bool track_geometry_animation = false;
-  float camera_scale = 1.0F;
+  double camera_scale = 1.0;
   std::int32_t camera_center_x = 0, camera_center_y = 0;
   double camera_offset_x = 0.0, camera_offset_y = 0.0;
+  std::int64_t camera_world_x = 0, camera_world_y = 0;
+  bool canvas_camera = false;
   std::uint32_t stack_index = 0;
   std::uint64_t scene_order = 0;
   std::uint32_t scene_rank = 2;
@@ -592,6 +594,14 @@ void NestedBackend::publish_dmabuf_importer() {
 }
 
 void NestedBackend::present(const ShmBufferView& buffer) {
+  if (buffer.camera_frame) {
+    camera_frame_preparing_ = !buffer.camera_frame_ready;
+    if (buffer.camera_frame_ready) {
+      repaint_pending_ = true;
+      if (renderer_ != nullptr) repaint_gpu(); else repaint();
+    }
+    return;
+  }
   if (buffer.tag_transition) {
     if (buffer.tag_transition_ready) {
       tag_transition_preparing_ = false;
@@ -640,6 +650,9 @@ void NestedBackend::present(const ShmBufferView& buffer) {
        window.camera_center_y = buffer.camera_center_y;
        window.camera_offset_x = buffer.camera_offset_x;
        window.camera_offset_y = buffer.camera_offset_y;
+       window.camera_world_x = buffer.camera_world_x;
+       window.camera_world_y = buffer.camera_world_y;
+       window.canvas_camera = buffer.canvas_camera;
         window.focused = buffer.focused;
         window.window_shader = buffer.window_shader;
         window.border_shader = buffer.border_shader;
@@ -678,7 +691,7 @@ void NestedBackend::present(const ShmBufferView& buffer) {
         }
       }
       for (auto& item : windows_) item.damaged = true;
-      if (!tag_transition_preparing_) {
+      if (!tag_transition_preparing_ && !camera_frame_preparing_) {
         repaint_pending_ = true;
         if (renderer_ != nullptr) repaint_gpu(); else repaint();
       }
@@ -713,7 +726,9 @@ void NestedBackend::present(const ShmBufferView& buffer) {
       }
       for (auto& window : windows_) window.damaged = true;
       repaint_pending_ = true;
-      if (renderer_ != nullptr) repaint_gpu(); else repaint();
+      if (!camera_frame_preparing_) {
+        if (renderer_ != nullptr) repaint_gpu(); else repaint();
+      }
     }
     return;
   }
@@ -761,6 +776,9 @@ void NestedBackend::present(const ShmBufferView& buffer) {
   window.camera_center_y = buffer.camera_center_y;
   window.camera_offset_x = buffer.camera_offset_x;
   window.camera_offset_y = buffer.camera_offset_y;
+  window.camera_world_x = buffer.camera_world_x;
+  window.camera_world_y = buffer.camera_world_y;
+  window.canvas_camera = buffer.canvas_camera;
   window.focused = buffer.focused;
   window.window_shader = buffer.window_shader;
   window.border_shader = buffer.border_shader;
@@ -836,7 +854,7 @@ void NestedBackend::present(const ShmBufferView& buffer) {
   });
   if (moved || is_new) for (auto& item : windows_) item.damaged = true;
   repaint_pending_ = true;
-  if (!tag_transition_preparing_) {
+  if (!tag_transition_preparing_ && !camera_frame_preparing_) {
     if (renderer_ != nullptr) repaint_gpu(); else repaint();
   }
 }

@@ -64,16 +64,20 @@ struct ShmBufferView {
   bool suppress_geometry_animation = false;
   // Follow moving endless-canvas targets.
   bool track_geometry_animation = false;
-  float camera_scale = 1.0F;
+  double camera_scale = 1.0;
   std::int32_t camera_center_x = 0;
   std::int32_t camera_center_y = 0;
   double camera_offset_x = 0.0, camera_offset_y = 0.0;
+  std::int64_t camera_world_x = 0, camera_world_y = 0;
+  bool canvas_camera = false;
   // False until the initial post-configure content commit.
   bool content_ready = true;
   // Brackets atomic publication of an output-local tag transition.
   bool tag_transition = false;
   bool tag_transition_ready = false;
   std::int8_t tag_transition_direction = 0;
+  bool camera_frame = false;
+  bool camera_frame_ready = false;
   // Root tile and content rectangles in global logical coordinates.
   std::int32_t assigned_tile_x = 0;
   std::int32_t assigned_tile_y = 0;

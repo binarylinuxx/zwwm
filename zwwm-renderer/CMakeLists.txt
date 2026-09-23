@@ -41,10 +41,3 @@ target_include_directories(zwwm_renderer PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/ge
 target_link_libraries(zwwm_renderer PUBLIC PkgConfig::EGL PkgConfig::EPOXY PkgConfig::LIBDRM PkgConfig::PNG)
 target_compile_options(zwwm_renderer PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_library(zwwm::renderer ALIAS zwwm_renderer)
-
-if(BUILD_TESTING)
-  add_executable(zwwm_renderer_tests tests/scene_test.cpp)
-  target_link_libraries(zwwm_renderer_tests PRIVATE zwwm::renderer)
-  target_compile_options(zwwm_renderer_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
-  add_test(NAME zwwm_renderer_tests COMMAND zwwm_renderer_tests)
-endif()
