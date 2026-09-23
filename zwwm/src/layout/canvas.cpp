@@ -127,6 +127,7 @@ std::optional<std::size_t> nearest_in_direction(
     if (!matches) continue;
     const double primary = direction == FocusDirection::left || direction == FocusDirection::right ? dx : dy;
     const double secondary = direction == FocusDirection::left || direction == FocusDirection::right ? dy : dx;
+    if (std::abs(secondary) > std::abs(primary)) continue;
     const double distance = primary * primary + secondary * secondary * 2.0;
     if (distance < nearest_distance) {
       nearest = index;

@@ -96,6 +96,8 @@ struct Observer {
   std::uint32_t refresh_millihz = 60000;
   zwwm::Camera camera;
   bool camera_frame = false;
+  bool canvas_frame = false;
+  OutputId canvas_frame_output;
   OutputId camera_output;
   std::uint8_t camera_tag = 0;
 };

@@ -705,13 +705,17 @@ Rect arrange_layers(Observer* observer, OutputId output) {
   }
   return work;
 }
-void configure_camera_frame(Observer* observer, OutputId output) {
+void configure_canvas_frame(Observer* observer, OutputId output, bool zoom) {
   if (observer->callback != nullptr)
     observer->callback(observer->data, ShmBufferView{
         .output = output, .camera_frame = true, .window_shader = {}, .border_shader = {}});
-  observer->camera_frame = true;
+  observer->camera_frame = zoom;
+  observer->canvas_frame = true;
+  observer->canvas_frame_output = output;
   configure_layout(observer);
   observer->camera_frame = false;
+  observer->canvas_frame = false;
+  observer->canvas_frame_output = {};
   if (observer->callback != nullptr)
     observer->callback(observer->data, ShmBufferView{
         .output = output, .camera_frame = true, .camera_frame_ready = true,
@@ -756,10 +760,11 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
       const bool state_changed = x->configured_states != states;
       x->tile_bounds = bounds;
       x->content_bounds = assigned;
-      if (observer->seat == nullptr || (!observer->camera.is_animating() && !observer->camera_frame))
+      if (observer->seat == nullptr || (!observer->camera.is_animating() && !observer->canvas_frame))
         send_configure(x, static_cast<std::int32_t>(client_content.size.width),
                        static_cast<std::int32_t>(client_content.size.height), states);
-      if (changed || state_changed || observer->camera_frame) notify_surface_tree(surface);
+      if (changed || state_changed || (observer->canvas_frame && x->output == observer->canvas_frame_output))
+        notify_surface_tree(surface);
       continue;
     }
 #ifdef ZWWM_XWAYLAND
@@ -798,7 +803,7 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
     const bool changed = !same_rect(role->tile_bounds, bounds) || !same_rect(role->content_bounds, assigned);
     role->tile_bounds = bounds;
     role->content_bounds = assigned;
-    const bool camera_only = observer->seat != nullptr && (observer->camera.is_animating() || observer->camera_frame);
+    const bool camera_only = observer->seat != nullptr && (observer->camera.is_animating() || observer->canvas_frame);
     if (changed && !camera_only && role->runtime != nullptr && role->runtime->connection != nullptr) {
       const std::array<std::uint32_t, 4> values{
           static_cast<std::uint32_t>(assigned.x), static_cast<std::uint32_t>(assigned.y),
@@ -814,7 +819,8 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
           values.data());
       xcb_flush(role->runtime->connection);
     }
-    if (changed || observer->camera_frame) notify_surface_tree(surface);
+    if (changed || (observer->canvas_frame && role->output == observer->canvas_frame_output))
+      notify_surface_tree(surface);
 #endif
   }
 }
@@ -3107,7 +3113,7 @@ void CompositorServer::notify_frame_presented(OutputId output) {
       auto& viewport = state->canvas_viewports[impl_->observer.camera_tag - 1];
       const Rect work = output_work(&impl_->observer, state->info.id);
       if (impl_->observer.camera.tick(viewport, work.width, work.height, now)) {
-        configure_camera_frame(&impl_->observer, state->info.id);
+        configure_canvas_frame(&impl_->observer, state->info.id, true);
       }
       if (impl_->observer.event_callback != nullptr)
         impl_->observer.event_callback(impl_->observer.event_data, "camera");
@@ -3434,7 +3440,7 @@ bool CompositorServer::pointer_pan_motion(double dx, double dy) {
   auto& viewport = output->canvas_viewports[output->active_tag - 1];
   viewport.x -= dx / viewport.scale;
   viewport.y -= dy / viewport.scale;
-  configure_layout(&impl_->observer);
+  configure_canvas_frame(&impl_->observer, output->info.id, false);
   if (impl_->observer.event_callback != nullptr)
     impl_->observer.event_callback(impl_->observer.event_data, "camera");
   sync_pointer_position(&seat);
@@ -3463,7 +3469,7 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
       const double dy = static_cast<double>(y) - impl_->seat_state.pointer_y;
       viewport.x -= dx / viewport.scale;
       viewport.y -= dy / viewport.scale;
-      configure_layout(&impl_->observer);
+      configure_canvas_frame(&impl_->observer, output->info.id, false);
       if (impl_->observer.event_callback != nullptr)
         impl_->observer.event_callback(impl_->observer.event_data, "camera");
       impl_->seat_state.pointer_x = x;
@@ -3901,7 +3907,7 @@ void CompositorServer::pointer_axis(std::uint32_t time, std::uint32_t axis, doub
         if (impl_->observer.camera.zoom_by_steps(
                 viewport, work.width, work.height,
                 binding.action == KeyAction::zoomin ? 1 : -1, timestamp_ms())) {
-          configure_camera_frame(&impl_->observer, output->info.id);
+          configure_canvas_frame(&impl_->observer, output->info.id, true);
         }
         if (impl_->observer.event_callback != nullptr)
           impl_->observer.event_callback(impl_->observer.event_data, "camera");
@@ -4006,25 +4012,7 @@ void CompositorServer::keyboard_key(std::uint32_t time, std::uint32_t key, std::
             )) notify_surface_tree(surface);
         if (binding.action == KeyAction::movetotag && xdg != nullptr) notify_toplevel_tags(&impl_->observer, xdg);
       } else if (binding.action == KeyAction::focus) {
-        std::vector<SurfaceState*> visible;
-        for (auto* surface : impl_->surfaces) {
-          if (surface->parent != nullptr) continue;
-          bool is_visible = surface->xdg_surface != nullptr && surface->xdg_surface->toplevel != nullptr &&
-                            visible_xdg(&impl_->observer, surface->xdg_surface);
-#ifdef ZWWM_XWAYLAND
-          if (!is_visible && surface->xwayland_surface != nullptr && surface->xwayland_surface->window != nullptr &&
-              surface->xwayland_surface->window->mapped) {
-            const auto* assigned_output = output_state(&impl_->observer, surface->xwayland_surface->output);
-            is_visible = assigned_output != nullptr && surface->xwayland_surface->tag == assigned_output->active_tag;
-          }
-#endif
-          if (is_visible) visible.push_back(surface);
-        }
-        if (!visible.empty()) {
-          auto current = std::find(visible.begin(), visible.end(), focused);
-          if (current == visible.end() || ++current == visible.end()) current = visible.begin();
-          set_keyboard_focus(&seat, *current); configure_layout(&impl_->observer);
-        }
+        (void)dispatch_action("focus", binding.argument, nullptr);
       }
       send_modifiers(seat);
       return;

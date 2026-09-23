@@ -15,6 +15,7 @@ LAUNCHER = "fuzzel"
 MOD = "Mod4"
 
 -- Commands run once after zwwm initializes. Each entry is passed to `sh -c`.
+-- They start after the first frame has been presented and the session is ready.
 -- exec-sh-on-startup = ["waybar", "swww-daemon"]
 
 -- Bindings are: modifiers, key, action, argument.
