@@ -91,7 +91,9 @@ bool binding_modifiers_match(const Keybinding& binding, const SeatState& seat) {
     const auto end = binding.modifiers.find('+', begin);
     const auto name = binding.modifiers.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
     if (!name.empty()) {
-      const auto index = xkb_keymap_mod_get_index(seat.xkb_keymap_handle, name.c_str());
+      const char* modifier = name == "Alt" || name == "alt" ? "Mod1" :
+                             name == "Super" || name == "super" ? "Mod4" : name.c_str();
+      const auto index = xkb_keymap_mod_get_index(seat.xkb_keymap_handle, modifier);
       if (index == XKB_MOD_INVALID || index >= sizeof(required) * 8U) return false;
       required |= static_cast<xkb_mod_mask_t>(1) << index;
     }
@@ -99,8 +101,14 @@ bool binding_modifiers_match(const Keybinding& binding, const SeatState& seat) {
     begin = end + 1;
   }
   const auto active = xkb_state_serialize_mods(seat.xkb_state_handle, XKB_STATE_MODS_DEPRESSED) |
-                      xkb_state_serialize_mods(seat.xkb_state_handle, XKB_STATE_MODS_LATCHED);
-  return active == required;
+                       xkb_state_serialize_mods(seat.xkb_state_handle, XKB_STATE_MODS_LATCHED);
+  xkb_mod_mask_t physical = 0;
+  for (const char* name : {"Shift", "Control", "Mod1", "Mod3", "Mod4", "Mod5"}) {
+    const auto index = xkb_keymap_mod_get_index(seat.xkb_keymap_handle, name);
+    if (index != XKB_MOD_INVALID && index < sizeof(physical) * 8U)
+      physical |= static_cast<xkb_mod_mask_t>(1) << index;
+  }
+  return (active & required) == required && (active & physical) == (required & physical);
 }
 bool binding_matches(const Keybinding& binding, const SeatState& seat, std::uint32_t key) {
   if (!binding_modifiers_match(binding, seat)) return false;

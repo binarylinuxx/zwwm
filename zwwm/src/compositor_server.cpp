@@ -705,11 +705,11 @@ Rect arrange_layers(Observer* observer, OutputId output) {
   }
   return work;
 }
-void configure_canvas_frame(Observer* observer, OutputId output, bool zoom) {
+void configure_canvas_frame(Observer* observer, OutputId output) {
   if (observer->callback != nullptr)
     observer->callback(observer->data, ShmBufferView{
         .output = output, .camera_frame = true, .window_shader = {}, .border_shader = {}});
-  observer->camera_frame = zoom;
+  observer->camera_frame = true;
   observer->canvas_frame = true;
   observer->canvas_frame_output = output;
   configure_layout(observer);
@@ -760,7 +760,7 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
       const bool state_changed = x->configured_states != states;
       x->tile_bounds = bounds;
       x->content_bounds = assigned;
-      if (observer->seat == nullptr || (!observer->camera.is_animating() && !observer->canvas_frame))
+      if (observer->seat == nullptr || !(observer->canvas_frame && x->output == observer->canvas_frame_output))
         send_configure(x, static_cast<std::int32_t>(client_content.size.width),
                        static_cast<std::int32_t>(client_content.size.height), states);
       if (changed || state_changed || (observer->canvas_frame && x->output == observer->canvas_frame_output))
@@ -803,7 +803,7 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
     const bool changed = !same_rect(role->tile_bounds, bounds) || !same_rect(role->content_bounds, assigned);
     role->tile_bounds = bounds;
     role->content_bounds = assigned;
-    const bool camera_only = observer->seat != nullptr && (observer->camera.is_animating() || observer->canvas_frame);
+    const bool camera_only = observer->canvas_frame && role->output == observer->canvas_frame_output;
     if (changed && !camera_only && role->runtime != nullptr && role->runtime->connection != nullptr) {
       const std::array<std::uint32_t, 4> values{
           static_cast<std::uint32_t>(assigned.x), static_cast<std::uint32_t>(assigned.y),
@@ -1117,7 +1117,7 @@ void notify_surface(SurfaceState* s) {
   view.stack_index = static_cast<std::uint32_t>(s->stack_order);
   const auto* seat = s->observer == nullptr ? nullptr : s->observer->seat;
   const bool canvas_interaction = endless_canvas(s->observer) && seat != nullptr &&
-      (seat->canvas_panning || seat->interactive != nullptr);
+      seat->interactive != nullptr;
   const bool zoom_frame = s->observer->camera.is_animating() || s->observer->camera_frame;
   view.suppress_geometry_animation = view.toplevel && seat != nullptr &&
       (zoom_frame || (seat->interactive != nullptr && !canvas_interaction));
@@ -2099,6 +2099,18 @@ void begin_interactive(XdgSurfaceState* x, zwayland::server::Client* client, std
 void end_interactive(SeatState* seat) {
   if (seat == nullptr) return;
   const bool restore_cursor = seat->canvas_panning;
+  auto* observer = seat->display.observer;
+  auto* pan_output = restore_cursor ? output_state(observer, seat->interactive_output) : nullptr;
+  bool pan_handled = false;
+  bool pan_changed = false;
+  if (pan_output != nullptr && observer->camera_output == pan_output->info.id &&
+      observer->camera_tag == pan_output->active_tag) {
+    const Rect work = output_work(observer, pan_output->info.id);
+    pan_handled = true;
+    pan_changed = observer->camera.finish_pan(
+        pan_output->canvas_viewports[pan_output->active_tag - 1], work.width, work.height);
+  }
+  if (restore_cursor && pan_output == nullptr) observer->camera.stop();
   seat->interactive = nullptr;
   seat->resize_edge = protocol::XDG_TOPLEVEL_RESIZE_EDGE_NONE;
   seat->compositor_interactive = false;
@@ -2107,7 +2119,13 @@ void end_interactive(SeatState* seat) {
   seat->interactive_button = 0;
   seat->interactive_output = {};
   seat->weight_before = seat->weight_after = 0;
-  configure_layout(seat->display.observer);
+  if (pan_handled) {
+    configure_canvas_frame(observer, pan_output->info.id);
+    if (pan_changed && observer->event_callback != nullptr)
+      observer->event_callback(observer->event_data, "camera");
+  } else {
+    configure_layout(observer);
+  }
   if (restore_cursor) {
     seat->cursor_override_shape.clear();
     apply_cursor_shape(seat);
@@ -3113,7 +3131,7 @@ void CompositorServer::notify_frame_presented(OutputId output) {
       auto& viewport = state->canvas_viewports[impl_->observer.camera_tag - 1];
       const Rect work = output_work(&impl_->observer, state->info.id);
       if (impl_->observer.camera.tick(viewport, work.width, work.height, now)) {
-        configure_canvas_frame(&impl_->observer, state->info.id, true);
+        configure_canvas_frame(&impl_->observer, state->info.id);
       }
       if (impl_->observer.event_callback != nullptr)
         impl_->observer.event_callback(impl_->observer.event_data, "camera");
@@ -3437,12 +3455,18 @@ bool CompositorServer::pointer_pan_motion(double dx, double dy) {
     end_interactive(&seat);
     return false;
   }
+  auto& observer = impl_->observer;
+  if (observer.camera_output != output->info.id || observer.camera_tag != output->active_tag) {
+    observer.camera.stop();
+    observer.camera_output = output->info.id;
+    observer.camera_tag = output->active_tag;
+  }
   auto& viewport = output->canvas_viewports[output->active_tag - 1];
-  viewport.x -= dx / viewport.scale;
-  viewport.y -= dy / viewport.scale;
-  configure_canvas_frame(&impl_->observer, output->info.id, false);
-  if (impl_->observer.event_callback != nullptr)
-    impl_->observer.event_callback(impl_->observer.event_data, "camera");
+  const Rect work = output_work(&observer, output->info.id);
+  if (observer.camera.pan_by(viewport, work.width, work.height, dx, dy, timestamp_ms())) {
+    configure_canvas_frame(&observer, output->info.id);
+    if (observer.event_callback != nullptr) observer.event_callback(observer.event_data, "camera");
+  }
   sync_pointer_position(&seat);
   return true;
 }
@@ -3464,14 +3488,20 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
     auto* output = output_state(&impl_->observer, impl_->seat_state.interactive_output);
     if (output == nullptr) end_interactive(&impl_->seat_state);
     else {
+      auto& observer = impl_->observer;
+      if (observer.camera_output != output->info.id || observer.camera_tag != output->active_tag) {
+        observer.camera.stop();
+        observer.camera_output = output->info.id;
+        observer.camera_tag = output->active_tag;
+      }
       auto& viewport = output->canvas_viewports[output->active_tag - 1];
       const double dx = static_cast<double>(x) - impl_->seat_state.pointer_x;
       const double dy = static_cast<double>(y) - impl_->seat_state.pointer_y;
-      viewport.x -= dx / viewport.scale;
-      viewport.y -= dy / viewport.scale;
-      configure_canvas_frame(&impl_->observer, output->info.id, false);
-      if (impl_->observer.event_callback != nullptr)
-        impl_->observer.event_callback(impl_->observer.event_data, "camera");
+      const Rect work = output_work(&observer, output->info.id);
+      if (observer.camera.pan_by(viewport, work.width, work.height, dx, dy, timestamp_ms())) {
+        configure_canvas_frame(&observer, output->info.id);
+        if (observer.event_callback != nullptr) observer.event_callback(observer.event_data, "camera");
+      }
       impl_->seat_state.pointer_x = x;
       impl_->seat_state.pointer_y = y;
       sync_pointer_position(&impl_->seat_state);
@@ -3695,6 +3725,8 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
     auto* output = output_state(&impl_->observer, impl_->active_output);
     if (output != nullptr) {
       impl_->observer.camera.stop();
+      impl_->observer.camera_output = output->info.id;
+      impl_->observer.camera_tag = output->active_tag;
       seat.compositor_interactive = true;
       seat.canvas_panning = true;
       seat.cursor_override_shape = "grabbing";
@@ -3703,7 +3735,6 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
       seat.interactive_output = output->info.id;
       seat.interactive_pointer_x = seat.pointer_x;
       seat.interactive_pointer_y = seat.pointer_y;
-      seat.canvas_pan_start = output->canvas_viewports[output->active_tag - 1];
       seat.pressed_buttons.push_back(button);
       seat.pointer_grab = nullptr;
       set_pointer_focus(&seat, nullptr, 0, 0);
@@ -3907,7 +3938,7 @@ void CompositorServer::pointer_axis(std::uint32_t time, std::uint32_t axis, doub
         if (impl_->observer.camera.zoom_by_steps(
                 viewport, work.width, work.height,
                 binding.action == KeyAction::zoomin ? 1 : -1, timestamp_ms())) {
-          configure_canvas_frame(&impl_->observer, output->info.id, true);
+          configure_canvas_frame(&impl_->observer, output->info.id);
         }
         if (impl_->observer.event_callback != nullptr)
           impl_->observer.event_callback(impl_->observer.event_data, "camera");

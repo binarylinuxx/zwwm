@@ -206,7 +206,6 @@ struct SeatState {
   std::int32_t interactive_pointer_x = 0, interactive_pointer_y = 0;
   std::int64_t interactive_canvas_x = 0, interactive_canvas_y = 0;
   std::int32_t interactive_canvas_width = 0, interactive_canvas_height = 0;
-  CanvasViewport canvas_pan_start;
   bool compositor_interactive = false;
   bool tiled_resize = false;
   bool canvas_panning = false;
