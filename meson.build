@@ -184,7 +184,7 @@ zwwm_renderer = static_library(
   ],
   include_directories: [renderer_inc, root_inc],
   dependencies: [egl, epoxy, libdrm, libpng],
-  cpp_args: strict_cpp,
+  cpp_args: strict_cpp + data_cpp,
 )
 zwwm_renderer_dep = declare_dependency(
   link_with: zwwm_renderer,
@@ -428,9 +428,9 @@ install_data(
   install_dir: join_paths(get_option('datadir'), 'dbus-1/services'),
 )
 install_data('zwwm/data/config.zw', install_dir: '/etc/xdg/zwwm')
-install_data('zwwm/data/background.png', install_dir: '/etc/xdg/zwwm')
+install_data('zwwm/data/background.png', install_dir: '/etc/xdg/zwwm/background')
 install_data('zwwm/data/config.zw', install_dir: get_option('datadir') / 'zwwm')
-install_data('zwwm/data/background.png', install_dir: get_option('datadir') / 'zwwm')
+install_data('zwwm/data/background.png', install_dir: get_option('datadir') / 'zwwm/background')
 install_data(
   'zwwm/data/shaders/window.frag',
   'zwwm/data/shaders/border.frag',

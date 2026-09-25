@@ -111,11 +111,11 @@ target_compile_definitions(zwwm PRIVATE
 install(TARGETS zwwm RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(PROGRAMS "${CMAKE_SOURCE_DIR}/zwwm-session" DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(FILES data/config.zw DESTINATION "${CMAKE_INSTALL_FULL_SYSCONFDIR}/xdg/zwwm")
-install(FILES data/background.png DESTINATION "${CMAKE_INSTALL_FULL_SYSCONFDIR}/xdg/zwwm")
+install(FILES data/background.png DESTINATION "${CMAKE_INSTALL_FULL_SYSCONFDIR}/xdg/zwwm/background")
 install(DIRECTORY data/shaders/ DESTINATION "${CMAKE_INSTALL_FULL_SYSCONFDIR}/xdg/zwwm/shaders")
 install(DIRECTORY data/shaders/ DESTINATION "${CMAKE_INSTALL_DATADIR}/zwwm/shaders")
 install(FILES data/config.zw DESTINATION "${CMAKE_INSTALL_DATADIR}/zwwm")
-install(FILES data/background.png DESTINATION "${CMAKE_INSTALL_DATADIR}/zwwm")
+install(FILES data/background.png DESTINATION "${CMAKE_INSTALL_DATADIR}/zwwm/background")
 install(FILES data/zwwm.desktop DESTINATION "${CMAKE_INSTALL_DATADIR}/wayland-sessions")
 install(FILES "${CMAKE_SOURCE_DIR}/README.md" "${CMAKE_SOURCE_DIR}/CONFIG.md"
               "${CMAKE_SOURCE_DIR}/CHANGELOG.md" "${CMAKE_SOURCE_DIR}/LICENSE"

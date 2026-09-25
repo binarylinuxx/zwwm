@@ -1,4 +1,5 @@
 find_package(PkgConfig REQUIRED)
+include(GNUInstallDirs)
 pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
 pkg_check_modules(EGL REQUIRED IMPORTED_TARGET egl)
 pkg_check_modules(LIBDRM REQUIRED IMPORTED_TARGET libdrm)
@@ -39,5 +40,6 @@ target_include_directories(zwwm_renderer PUBLIC
 )
 target_include_directories(zwwm_renderer PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/zwwm/renderer")
 target_link_libraries(zwwm_renderer PUBLIC PkgConfig::EGL PkgConfig::EPOXY PkgConfig::LIBDRM PkgConfig::PNG)
+target_compile_definitions(zwwm_renderer PRIVATE ZWWM_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/zwwm")
 target_compile_options(zwwm_renderer PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_library(zwwm::renderer ALIAS zwwm_renderer)

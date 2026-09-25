@@ -49,10 +49,6 @@ bool bootstrap_user_config(const std::filesystem::path& config) {
                                shader_dir / name) && !std::filesystem::exists(shader_dir / name))
       return false;
   }
-  if (!install_default_file(std::filesystem::path(ZWWM_DATA_DIR) / "background.png",
-                            config.parent_path() / "background.png") &&
-      !std::filesystem::exists(config.parent_path() / "background.png"))
-    return false;
   return install_default_file(std::filesystem::path(ZWWM_DATA_DIR) / "config.zw", config) ||
       install_default_file("/etc/xdg/zwwm/config.zw", config) || std::filesystem::exists(config);
 }
@@ -579,8 +575,10 @@ RuntimeConfigResult compile_runtime_config(const lang::Config& parsed) {
       const auto select_default = [&](CustomShaderRole role, std::string& target) {
         const auto shader = std::find_if(mutable_config->shaders.begin(), mutable_config->shaders.end(),
                                          [&](const auto& candidate) { return candidate.role == role; });
-        if (shader == mutable_config->shaders.end())
-          error(result.diagnostics, item->location, "shaders must define each of the window, border, and background roles");
+        if (shader == mutable_config->shaders.end()) {
+          if (role == CustomShaderRole::background) target.clear();
+          else error(result.diagnostics, item->location, "shaders must define window and border roles");
+        }
         else
           target = shader->name;
       };
@@ -875,7 +873,8 @@ RuntimeConfigResult compile_runtime_config(const lang::Config& parsed) {
       assignment(parsed, "shaders")->location;
   validate_shader(mutable_config->window_shader, CustomShaderRole::window, shaders_location, "window shader");
   validate_shader(mutable_config->border_shader, CustomShaderRole::border, shaders_location, "border shader");
-  validate_shader(mutable_config->background_shader, CustomShaderRole::background, shaders_location, "background shader");
+  if (!mutable_config->background_shader.empty())
+    validate_shader(mutable_config->background_shader, CustomShaderRole::background, shaders_location, "background shader");
   for (const auto& rule : mutable_config->window_rules) {
     if (!rule.window_shader.empty()) validate_shader(rule.window_shader, CustomShaderRole::window, {}, "rule window-shader");
     if (!rule.border_shader.empty()) validate_shader(rule.border_shader, CustomShaderRole::border, {}, "rule border-shader");
@@ -902,9 +901,6 @@ RuntimeConfigResult load_runtime_config_file(const std::string& path) {
       std::filesystem::path shader_path(shader.source);
       if (shader_path.is_relative()) shader.source = (base / shader_path).lexically_normal().string();
     }
-    std::filesystem::path background_path(mutable_config->background_image);
-    if (background_path.is_relative())
-      mutable_config->background_image = (base / background_path).lexically_normal().string();
   }
   return result;
 }
@@ -916,7 +912,6 @@ bool load_shader_sources(const RuntimeConfig& config, renderer::ShaderSources* s
   loaded.window = config.window_shader;
   loaded.border = config.border_shader;
   loaded.background = config.background_shader;
-  loaded.background_image = config.background_image;
   for (const auto& shader : config.shaders) {
     std::ifstream input(shader.source, std::ios::binary | std::ios::ate);
     if (!input) {

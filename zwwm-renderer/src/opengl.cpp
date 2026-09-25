@@ -6,11 +6,27 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
 #include <limits>
 #include <utility>
 
+#ifndef ZWWM_DATA_DIR
+#define ZWWM_DATA_DIR "/usr/share/zwwm"
+#endif
+
 namespace zwwm::renderer {
 namespace {
+
+std::string default_wallpaper_path() {
+  for (const auto& path : {
+           std::filesystem::path{"/etc/xdg/zwwm/background/background.png"},
+           std::filesystem::path{ZWWM_DATA_DIR} / "background/background.png",
+           std::filesystem::path{"zwwm/data/background.png"}}) {
+    std::error_code error;
+    if (std::filesystem::is_regular_file(path, error)) return path.string();
+  }
+  return "/etc/xdg/zwwm/background/background.png";
+}
 
 struct RenderDraw : DrawCall {
   FloatRect bounds, toplevel_bounds;
@@ -28,7 +44,8 @@ struct RenderDraw : DrawCall {
   }
 };
 
-GLuint load_png_texture(const std::string& path, std::string& error) {
+GLuint load_png_texture(const std::string& path, std::string& error,
+                        std::uint32_t* width, std::uint32_t* height) {
   png_image image{};
   image.version = PNG_IMAGE_VERSION;
   if (png_image_begin_read_from_file(&image, path.c_str()) == 0) {
@@ -61,6 +78,8 @@ GLuint load_png_texture(const std::string& path, std::string& error) {
                static_cast<GLsizei>(image.height), 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
   glBindTexture(GL_TEXTURE_2D, 0);
+  *width = image.width;
+  *height = image.height;
   png_image_free(&image);
   return texture;
 }
@@ -393,9 +412,8 @@ bool OpenGlRenderer::initialize() {
 
 bool OpenGlRenderer::prepare_shaders(const ShaderSources& sources) {
   discard_shaders();
-  if (!ready() || sources.programs.empty() || sources.window.empty() || sources.border.empty() ||
-      sources.background.empty()) {
-    last_error_ = "named window, border, and background shaders are required";
+  if (!ready() || sources.programs.empty() || sources.window.empty() || sources.border.empty()) {
+    last_error_ = "named window and border shaders are required";
     return false;
   }
   for (const auto& source : sources.programs) {
@@ -426,12 +444,13 @@ bool OpenGlRenderer::prepare_shaders(const ShaderSources& sources) {
   };
   if (!valid_default(sources.window, ShaderRole::window) ||
       !valid_default(sources.border, ShaderRole::border) ||
-      !valid_default(sources.background, ShaderRole::background)) {
+      (!sources.background.empty() && !valid_default(sources.background, ShaderRole::background))) {
     last_error_ = "default shader names must resolve to programs with matching roles";
     discard_shaders();
     return false;
   }
-  pending_wallpaper_texture_ = load_png_texture(sources.background_image, last_error_);
+  pending_wallpaper_texture_ = load_png_texture(default_wallpaper_path(), last_error_,
+                                               &pending_wallpaper_width_, &pending_wallpaper_height_);
   if (pending_wallpaper_texture_ == 0) {
     discard_shaders();
     return false;
@@ -455,6 +474,8 @@ void OpenGlRenderer::commit_shaders() {
   background_shader_ = std::move(pending_background_shader_);
   if (wallpaper_texture_ != 0) glDeleteTextures(1, &wallpaper_texture_);
   wallpaper_texture_ = std::exchange(pending_wallpaper_texture_, 0);
+  wallpaper_width_ = std::exchange(pending_wallpaper_width_, 0);
+  wallpaper_height_ = std::exchange(pending_wallpaper_height_, 0);
 }
 
 void OpenGlRenderer::discard_shaders() {
@@ -470,6 +491,7 @@ void OpenGlRenderer::discard_shaders() {
     glDeleteTextures(1, &pending_wallpaper_texture_);
     pending_wallpaper_texture_ = 0;
   }
+  pending_wallpaper_width_ = pending_wallpaper_height_ = 0;
 }
 
 void OpenGlRenderer::shutdown() {
@@ -483,6 +505,7 @@ void OpenGlRenderer::shutdown() {
     glDeleteTextures(1, &wallpaper_texture_);
     wallpaper_texture_ = 0;
   }
+  wallpaper_width_ = wallpaper_height_ = 0;
   if (!kawase_textures_.empty()) {
     glDeleteTextures(static_cast<GLsizei>(kawase_textures_.size()), kawase_textures_.data());
     kawase_textures_.clear();
@@ -698,6 +721,40 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
   glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   glUniform1i(background_texture_location_, 1);
   glUniform2f(target_size_location_, static_cast<float>(target_size.width), static_cast<float>(target_size.height));
+  if (frame.draw_background && wallpaper_texture_ != 0 &&
+      wallpaper_width_ != 0 && wallpaper_height_ != 0) {
+    const float output_aspect = static_cast<float>(target_size.width) / target_size.height;
+    const float image_aspect = static_cast<float>(wallpaper_width_) / wallpaper_height_;
+    float left = 0.0F, top = 0.0F, right = 1.0F, bottom = 1.0F;
+    if (output_aspect > image_aspect) {
+      const float visible = image_aspect / output_aspect;
+      top = (1.0F - visible) * 0.5F;
+      bottom = 1.0F - top;
+    } else {
+      const float visible = output_aspect / image_aspect;
+      left = (1.0F - visible) * 0.5F;
+      right = 1.0F - left;
+    }
+    glDisable(GL_BLEND);
+    glUniform4f(rect_location_, -1.0F, 1.0F, 2.0F, -2.0F);
+    glUniform2f(rect_size_location_, static_cast<float>(target_size.width),
+                static_cast<float>(target_size.height));
+    glUniform4f(color_location_, 1.0F, 1.0F, 1.0F, 1.0F);
+    glUniform1f(corner_radius_location_, 0.0F);
+    glUniform1f(border_width_location_, 0.0F);
+    glUniform1i(background_only_location_, GL_FALSE);
+    glUniform1i(has_surface_texture_location_, GL_TRUE);
+    glUniform1i(has_texture_rect_location_, GL_FALSE);
+    glUniform1i(has_clip_location_, GL_FALSE);
+    glUniform4f(source_uv_location_, left, top, right, bottom);
+    glUniform2f(draw_origin_location_, 0.0F, 0.0F);
+    glUniform1i(texture_transform_location_, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, wallpaper_texture_);
+    glUniform1i(surface_texture_location_, 0);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
   const auto custom_program = [&](const std::string& requested, const std::string& fallback,
                                   ShaderRole role) -> const CustomProgram* {
     const auto selected = custom_programs_.find(requested.empty() ? fallback : requested);
@@ -707,7 +764,7 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
   const auto* background_program = custom_program({}, background_shader_, ShaderRole::background);
   if (frame.draw_background && background_program != nullptr) {
     glUseProgram(background_program->program);
-    glDisable(GL_BLEND);
+    glEnable(GL_BLEND);
     uniform_4f(background_program->program, "rect", -1.0F, 1.0F, 2.0F, -2.0F);
     uniform_2f(background_program->program, "rect_size", static_cast<float>(target_size.width),
                static_cast<float>(target_size.height));

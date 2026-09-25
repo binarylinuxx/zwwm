@@ -168,7 +168,6 @@ shaders = {
   background = {
     role = "background"
     source = "shaders/background.frag"
-    values = { top_color = "#20242b" bottom_color = "#13161b" }
   }
 }
 ```
@@ -265,11 +264,14 @@ a managed surface tree the same root coordinate system, while
 window shader demonstrates clipping and correct sampling of undersized client
 buffers without stretching.
 
-The compositor loads `background.png` beside the active configuration and uses
-it as a center-cropped, full-output default wallpaper. The background shader
-renders it before scene surfaces and before any layer-shell wallpaper client. It is
-guaranteed `zwwm_output_size` and `zwwm_time`; it may also use the vertex-stage
-varyings. Animating a shader does not itself schedule frames, so continuous
+The compositor loads its default wallpaper from
+`/etc/xdg/zwwm/background/background.png` (or its packaged data copy) and uses
+it as a center-cropped, full-output background. It is not copied into the user
+configuration directory or resolved relative to `config.zw`. The compositor
+draws it independently of user shaders. An optional background shader can draw
+over it, before scene surfaces and layer-shell wallpaper clients; it receives
+`zwwm_output_size` and `zwwm_time` and may use vertex-stage varyings.
+Animating a shader does not itself schedule frames, so continuous
 animation requires another active repaint source such as a configured animated
 effect.
 
