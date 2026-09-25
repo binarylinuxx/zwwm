@@ -23,7 +23,8 @@ bool publishActivationEnvironment() {
   QMap<QString, QString> environment;
   QStringList assignments;
   for (const char* name : {"WAYLAND_DISPLAY", "DISPLAY", "XDG_CURRENT_DESKTOP",
-                           "XDG_SESSION_DESKTOP", "XDG_SESSION_TYPE"}) {
+                           "XDG_SESSION_DESKTOP", "XDG_SESSION_TYPE", "XDG_DATA_DIRS",
+                           "NIX_XDG_DESKTOP_PORTAL_DIR"}) {
     const char* value = std::getenv(name);
     if (value == nullptr || *value == '\0') continue;
     const QString key = QString::fromLatin1(name);

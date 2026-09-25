@@ -74,6 +74,7 @@ stdenv.mkDerivation {
     libXcursor
     pipewire
     qt6.qtbase
+    qt6.qtwayland
     seatd
     systemd
     xdg-desktop-portal
@@ -90,7 +91,7 @@ stdenv.mkDerivation {
     wrapProgram "$out/bin/zwwm-session" \
       --prefix PATH : "$out/bin:${lib.makeBinPath ([ xdg-desktop-portal xdg-desktop-portal-gtk ] ++ lib.optional xwaylandSupport xwayland)}" \
       --prefix XDG_DATA_DIRS : "$out/share" \
-      --set NIX_XDG_DESKTOP_PORTAL_DIR "$out/share/xdg-desktop-portal/portals"
+      --prefix NIX_XDG_DESKTOP_PORTAL_DIR : "$out/share/xdg-desktop-portal/portals"
     substituteInPlace "$out/share/wayland-sessions/zwwm.desktop" \
       --replace-fail "Exec=zwwm-session" "Exec=$out/bin/zwwm-session"
     substituteInPlace "$out/share/dbus-1/services/org.freedesktop.impl.portal.desktop.zwwm.service" \

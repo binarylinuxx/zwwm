@@ -1118,9 +1118,18 @@ void notify_surface(SurfaceState* s) {
   const auto* seat = s->observer == nullptr ? nullptr : s->observer->seat;
   const bool canvas_interaction = endless_canvas(s->observer) && seat != nullptr &&
       seat->interactive != nullptr;
+  const bool canvas_window = endless_canvas(s->observer) && view.toplevel &&
+      ((scene_root->xdg_surface != nullptr && scene_root->xdg_surface->toplevel != nullptr &&
+        !scene_root->xdg_surface->fullscreen)
+#ifdef ZWWM_XWAYLAND
+       || (scene_root->xwayland_surface != nullptr && scene_root->xwayland_surface->window != nullptr &&
+           !scene_root->xwayland_surface->fullscreen)
+#endif
+      );
   const bool zoom_frame = s->observer->camera.is_animating() || s->observer->camera_frame;
   view.suppress_geometry_animation = view.toplevel && seat != nullptr &&
-      (zoom_frame || (seat->interactive != nullptr && !canvas_interaction));
+      (zoom_frame || (canvas_window && !canvas_interaction) ||
+       (seat->interactive != nullptr && !canvas_interaction));
   view.track_geometry_animation = view.toplevel && canvas_interaction && !zoom_frame;
   absolute_position(s, &view.x, &view.y);
     if (auto* xdg_root = root(s)->xdg_surface;
@@ -2101,15 +2110,8 @@ void end_interactive(SeatState* seat) {
   const bool restore_cursor = seat->canvas_panning;
   auto* observer = seat->display.observer;
   auto* pan_output = restore_cursor ? output_state(observer, seat->interactive_output) : nullptr;
-  bool pan_handled = false;
-  bool pan_changed = false;
-  if (pan_output != nullptr && observer->camera_output == pan_output->info.id &&
-      observer->camera_tag == pan_output->active_tag) {
-    const Rect work = output_work(observer, pan_output->info.id);
-    pan_handled = true;
-    pan_changed = observer->camera.finish_pan(
-        pan_output->canvas_viewports[pan_output->active_tag - 1], work.width, work.height);
-  }
+  const bool pan_handled = pan_output != nullptr && observer->camera_output == pan_output->info.id &&
+      observer->camera_tag == pan_output->active_tag;
   if (restore_cursor && pan_output == nullptr) observer->camera.stop();
   seat->interactive = nullptr;
   seat->resize_edge = protocol::XDG_TOPLEVEL_RESIZE_EDGE_NONE;
@@ -2121,8 +2123,6 @@ void end_interactive(SeatState* seat) {
   seat->weight_before = seat->weight_after = 0;
   if (pan_handled) {
     configure_canvas_frame(observer, pan_output->info.id);
-    if (pan_changed && observer->event_callback != nullptr)
-      observer->event_callback(observer->event_data, "camera");
   } else {
     configure_layout(observer);
   }
@@ -3462,8 +3462,7 @@ bool CompositorServer::pointer_pan_motion(double dx, double dy) {
     observer.camera_tag = output->active_tag;
   }
   auto& viewport = output->canvas_viewports[output->active_tag - 1];
-  const Rect work = output_work(&observer, output->info.id);
-  if (observer.camera.pan_by(viewport, work.width, work.height, dx, dy, timestamp_ms())) {
+  if (observer.camera.pan_by(viewport, dx, dy)) {
     configure_canvas_frame(&observer, output->info.id);
     if (observer.event_callback != nullptr) observer.event_callback(observer.event_data, "camera");
   }
@@ -3497,8 +3496,7 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
       auto& viewport = output->canvas_viewports[output->active_tag - 1];
       const double dx = static_cast<double>(x) - impl_->seat_state.pointer_x;
       const double dy = static_cast<double>(y) - impl_->seat_state.pointer_y;
-      const Rect work = output_work(&observer, output->info.id);
-      if (observer.camera.pan_by(viewport, work.width, work.height, dx, dy, timestamp_ms())) {
+      if (observer.camera.pan_by(viewport, dx, dy)) {
         configure_canvas_frame(&observer, output->info.id);
         if (observer.event_callback != nullptr) observer.event_callback(observer.event_data, "camera");
       }
