@@ -75,10 +75,17 @@ void configure_layout(Observer* observer, XdgSurfaceState* candidate);
 void focus_xwayland_if_needed(SurfaceState* surface);
 #endif
 ProtocolGlobals& ProtocolGlobals::operator=(zwayland::server::Display* next) {
+    static const zwayland::server::Interface layer_shell_compat{
+        "zwlr_layer_shell_v1", 4,
+        protocol::zwwm_layer_shell_v1_interface.methods,
+        protocol::zwwm_layer_shell_v1_interface.method_count,
+        protocol::zwwm_layer_shell_v1_interface.events,
+        protocol::zwwm_layer_shell_v1_interface.event_count};
     display = next;
     viewporter = next->add_global(&protocol::wp_viewporter_interface, 1, [](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_viewporter)(&client, nullptr, bound_version, id); });
     fractional_scale_manager = next->add_global(&protocol::wp_fractional_scale_manager_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_fractional_scale_manager)(&client, data, bound_version, id); });
     layer_shell = next->add_global(&protocol::zwwm_layer_shell_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_layer_shell)(&client, data, bound_version, id); });
+    layer_shell_alias = next->add_global(&layer_shell_compat, 4, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_layer_shell)(&client, data, bound_version, id); });
     xwlr_layer_shell = next->add_global(&protocol::xwlr_layer_shell_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_xwlr_layer_shell)(&client, data, bound_version, id); });
     relative_pointer_manager = next->add_global(&protocol::zwp_relative_pointer_manager_v1_interface, 1, [data = observer->seat](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_relative_pointer_manager)(&client, data, bound_version, id); });
     idle_notifier = next->add_global(&protocol::ext_idle_notifier_v1_interface, 2, [data = observer->seat](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_idle_notifier)(&client, data, bound_version, id); });
@@ -89,6 +96,7 @@ ProtocolGlobals::~ProtocolGlobals() {
     if (idle_notifier != 0) display->destroy_global(idle_notifier);
     if (relative_pointer_manager != 0) display->destroy_global(relative_pointer_manager);
     if (xwlr_layer_shell != 0) display->destroy_global(xwlr_layer_shell);
+    if (layer_shell_alias != 0) display->destroy_global(layer_shell_alias);
     if (layer_shell != 0) display->destroy_global(layer_shell);
     if (fractional_scale_manager != 0) display->destroy_global(fractional_scale_manager);
     if (viewporter != 0) display->destroy_global(viewporter);

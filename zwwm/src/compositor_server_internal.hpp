@@ -156,6 +156,7 @@ struct ProtocolGlobals {
   std::uint32_t viewporter = 0;
   std::uint32_t fractional_scale_manager = 0;
   std::uint32_t layer_shell = 0;
+  std::uint32_t layer_shell_alias = 0;
   std::uint32_t xwlr_layer_shell = 0;
   std::uint32_t relative_pointer_manager = 0;
   std::uint32_t idle_notifier = 0;

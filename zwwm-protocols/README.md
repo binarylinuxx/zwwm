@@ -29,6 +29,8 @@ The layer-shell and companion extension XML are installed in
 anchor, keyboard-interactivity, error, and
 configure/closed types and requests corresponding to zwlr layer shell, under
 `zwwm_layer_shell_v1` and `zwwm_layer_surface_v1` names. Clients must bind
-`zwwm_layer_shell_v1` and use these types; zwwm does not advertise the zwlr
-layer-shell global. The optional `xwlr_layer_shell_v1` extension now accepts
-`zwwm_layer_surface_v1` objects.
+`zwwm_layer_shell_v1` and use these types. For existing layer-shell clients,
+zwwm also advertises the `zwlr_layer_shell_v1` registry name (up to version 4)
+as a wire-compatible alias of the same zwwm layer handler. This does not add a
+second layer implementation. The optional `xwlr_layer_shell_v1` extension
+accepts `zwwm_layer_surface_v1` objects.
