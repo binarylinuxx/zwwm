@@ -7,7 +7,7 @@
 #include <xdg-shell-zwayland-server.h>
 #include <pointer-constraints-zwayland-server.h>
 #include <ext-idle-notify-zwayland-server.h>
-#include <wlr-layer-shell-unstable-v1-zwayland-server.h>
+#include <zwwm-layer-shell-v1-zwayland-server.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include "zwwm/runtime_config.hpp"
@@ -143,7 +143,7 @@ struct SurfaceState {
 #endif
   std::shared_ptr<bool> alive = std::make_shared<bool>(true);
 };
-struct LayerState { std::uint32_t layer = protocol::ZWLR_LAYER_SHELL_V1_LAYER_TOP, anchor = 0, keyboard = protocol::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE; std::int32_t width = 0, height = 0, zone = 0, top = 0, right = 0, bottom = 0, left = 0; };
+struct LayerState { std::uint32_t layer = protocol::ZWWM_LAYER_SHELL_V1_LAYER_TOP, anchor = 0, keyboard = protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE; std::int32_t width = 0, height = 0, zone = 0, top = 0, right = 0, bottom = 0, left = 0; };
 struct XwlrLayerState { zwayland::server::Resource* resource = nullptr; LayerSurfaceState* layer = nullptr; std::uint32_t pending_edge = 0, current_edge = 0, reported_anchor = 0; std::int32_t pending_priority = 0, current_priority = 0, reported_zone = 0; double pending_opacity = 256, current_opacity = 256; bool ignored_reported = false; };
 struct LayerSurfaceState { zwayland::server::Resource* resource = nullptr; SurfaceState* surface = nullptr; OutputId output; std::string name_space; LayerState pending, current; XwlrLayerState* xwlr = nullptr; std::uint64_t creation = 0; std::vector<std::uint32_t> serials; std::uint32_t last_sent = 0, last_acked = 0; std::int32_t configured_width = -1, configured_height = -1; bool configured = false, mapped = false, configure_requested = false, closed = false; };
 struct LockSurfaceState { SessionLockState* lock = nullptr; zwayland::server::Resource* resource = nullptr; SurfaceState* surface = nullptr; OutputId output; std::vector<std::uint32_t> serials; std::uint32_t acked = 0; std::uint32_t width = 0, height = 0; bool mapped = false, presented = false; };

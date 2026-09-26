@@ -2,7 +2,7 @@
 
 #include <zwayland/server/display.hpp>
 #include <wayland-zwayland-server.h>
-#include <wlr-layer-shell-unstable-v1-zwayland-server.h>
+#include <zwwm-layer-shell-v1-zwayland-server.h>
 #include <xwlr-layer-shell-v1-zwayland-server.h>
 
 #include <algorithm>
@@ -16,14 +16,14 @@ namespace zwwm::detail {
 namespace {
 
 void layer_destroyed(zwayland::server::Resource* resource) { auto* layer = resource->data<LayerSurfaceState>(); if (layer == nullptr) return; if (layer->xwlr != nullptr) { layer->xwlr->layer = nullptr; layer->xwlr->resource->destroy(); } if (layer->surface != nullptr) { auto* observer = layer->surface->observer; const bool focused = observer != nullptr && observer->seat != nullptr && root(observer->seat->keyboard_focus) == layer->surface; if (auto* output = output_state(observer, layer->output); output != nullptr) std::erase(output->layer_roots[layer->current.layer], layer->surface); layer->surface->layer_surface = nullptr; if (focused) set_keyboard_focus(observer->seat, observer->seat->regular_focus); configure_layout(observer); refresh_layer_keyboard_focus(observer); } delete layer; }
-void layer_set_size(zwayland::server::Client*, zwayland::server::Resource* resource, std::uint32_t width, std::uint32_t height) { auto* layer = resource->data<LayerSurfaceState>(); if (width > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || height > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) { resource->post_error(protocol::ZWLR_LAYER_SURFACE_V1_ERROR_INVALID_SIZE, "invalid layer size"); return; } layer->pending.width = static_cast<int>(width); layer->pending.height = static_cast<int>(height); }
-void layer_set_anchor(zwayland::server::Client*, zwayland::server::Resource* resource, std::uint32_t anchor) { if ((anchor & ~15U) != 0) { resource->post_error(protocol::ZWLR_LAYER_SURFACE_V1_ERROR_INVALID_ANCHOR, "invalid layer anchor"); return; } resource->data<LayerSurfaceState>()->pending.anchor = anchor; }
+void layer_set_size(zwayland::server::Client*, zwayland::server::Resource* resource, std::uint32_t width, std::uint32_t height) { auto* layer = resource->data<LayerSurfaceState>(); if (width > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || height > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) { resource->post_error(protocol::ZWWM_LAYER_SURFACE_V1_ERROR_INVALID_SIZE, "invalid layer size"); return; } layer->pending.width = static_cast<int>(width); layer->pending.height = static_cast<int>(height); }
+void layer_set_anchor(zwayland::server::Client*, zwayland::server::Resource* resource, std::uint32_t anchor) { if ((anchor & ~15U) != 0) { resource->post_error(protocol::ZWWM_LAYER_SURFACE_V1_ERROR_INVALID_ANCHOR, "invalid layer anchor"); return; } resource->data<LayerSurfaceState>()->pending.anchor = anchor; }
 void layer_set_zone(zwayland::server::Client*, zwayland::server::Resource* resource, std::int32_t zone) { resource->data<LayerSurfaceState>()->pending.zone = zone; }
 void layer_set_margin(zwayland::server::Client*, zwayland::server::Resource* resource, std::int32_t top, std::int32_t right, std::int32_t bottom, std::int32_t left) { auto& state = resource->data<LayerSurfaceState>()->pending; state.top = top; state.right = right; state.bottom = bottom; state.left = left; }
-void layer_set_keyboard(zwayland::server::Client*, zwayland::server::Resource* resource, std::uint32_t keyboard) { if (keyboard > protocol::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND) { resource->post_error(protocol::ZWLR_LAYER_SURFACE_V1_ERROR_INVALID_KEYBOARD_INTERACTIVITY, "invalid keyboard interactivity"); return; } resource->data<LayerSurfaceState>()->pending.keyboard = keyboard; }
+void layer_set_keyboard(zwayland::server::Client*, zwayland::server::Resource* resource, std::uint32_t keyboard) { if (keyboard > protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND) { resource->post_error(protocol::ZWWM_LAYER_SURFACE_V1_ERROR_INVALID_KEYBOARD_INTERACTIVITY, "invalid keyboard interactivity"); return; } resource->data<LayerSurfaceState>()->pending.keyboard = keyboard; }
 void layer_ack(zwayland::server::Client*, zwayland::server::Resource* resource, std::uint32_t serial) { auto* layer = resource->data<LayerSurfaceState>(); const auto it = std::find(layer->serials.begin(), layer->serials.end(), serial); if (it != layer->serials.end()) { layer->serials.erase(layer->serials.begin(), std::next(it)); layer->last_acked = serial; layer->configured = true; } }
 void layer_get_popup(zwayland::server::Client* client, zwayland::server::Resource* resource, zwayland::server::Resource* popup_resource) { associate_layer_popup(resource->data<LayerSurfaceState>(), client, resource, popup_resource); }
-struct ZwlrLayerSurfaceV1KLayerSurfaceHandler {
+struct ZwwmLayerSurfaceV1Handler {
   void set_size(zwayland::server::Client& client, zwayland::server::Resource& resource, std::uint32_t width, std::uint32_t height) {
     (layer_set_size)(&client, &resource, width, height);
   }
@@ -49,7 +49,7 @@ struct ZwlrLayerSurfaceV1KLayerSurfaceHandler {
     ([](zwayland::server::Client*, zwayland::server::Resource* resource) { resource->destroy(); })(&client, &resource);
   }
   void set_layer(zwayland::server::Client& client, zwayland::server::Resource& resource, std::uint32_t layer) {
-    ([](zwayland::server::Client*, zwayland::server::Resource* resource, std::uint32_t value) { if (value > protocol::ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY) { resource->post_error(protocol::ZWLR_LAYER_SHELL_V1_ERROR_INVALID_LAYER, "invalid layer"); return; } resource->data<LayerSurfaceState>()->pending.layer = value; })(&client, &resource, layer);
+    ([](zwayland::server::Client*, zwayland::server::Resource* resource, std::uint32_t value) { if (value > protocol::ZWWM_LAYER_SHELL_V1_LAYER_OVERLAY) { resource->post_error(protocol::ZWWM_LAYER_SHELL_V1_ERROR_INVALID_LAYER, "invalid layer"); return; } resource->data<LayerSurfaceState>()->pending.layer = value; })(&client, &resource, layer);
   }
 };
 void layer_get_surface(zwayland::server::Client* client, zwayland::server::Resource* manager, std::uint32_t id, zwayland::server::Resource* surface_resource, zwayland::server::Resource* output_resource, std::uint32_t value, const char* name_space) {
@@ -74,8 +74,8 @@ void layer_get_surface(zwayland::server::Client* client, zwayland::server::Resou
   // Valid for a null output to be omitted by the client; when no output is
   // known yet the surface is created without one and is pinned by set_outputs
   // once the backend publishes its first output.
-  if (surface == nullptr || surface_resource->client != client || surface->xdg_surface != nullptr || surface->layer_surface != nullptr || surface->layer_role_assigned || surface->parent != nullptr || surface->drag_icon_role || surface->current_buffer != nullptr || value > protocol::ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY) { manager->post_error(value > protocol::ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY ? protocol::ZWLR_LAYER_SHELL_V1_ERROR_INVALID_LAYER : protocol::ZWLR_LAYER_SHELL_V1_ERROR_ROLE, "invalid layer surface"); return; } auto* resource = client->create_resource(&protocol::zwlr_layer_surface_v1_interface, id, std::min(manager->version, 4U)); auto* layer = resource == nullptr ? nullptr : new (std::nothrow) LayerSurfaceState; if (resource == nullptr || layer == nullptr) { if (resource != nullptr) resource->destroy(); client->post_no_memory(); return; } static std::uint64_t creation = 1; layer->resource = resource; layer->surface = surface; layer->output = output; layer->name_space = name_space == nullptr ? "" : name_space; layer->creation = creation++; layer->pending.layer = layer->current.layer = value; surface->layer_surface = layer; surface->layer_role_assigned = true; if (auto* owner = output_state(surface->observer, output); owner != nullptr) { owner->layer_roots[value].push_back(surface); reorder_layer_roots(surface->observer, output, value); } resource->set_data(layer); resource->set_handler(protocol::zwlr_layer_surface_v1_handler(ZwlrLayerSurfaceV1KLayerSurfaceHandler{})); resource->set_destroy_handler([](zwayland::server::Resource& destroyed) { (layer_destroyed)(&destroyed); }); }
-struct ZwlrLayerShellV1KLayerShellHandler {
+  if (surface == nullptr || surface_resource->client != client || surface->xdg_surface != nullptr || surface->layer_surface != nullptr || surface->layer_role_assigned || surface->parent != nullptr || surface->drag_icon_role || surface->current_buffer != nullptr || value > protocol::ZWWM_LAYER_SHELL_V1_LAYER_OVERLAY) { manager->post_error(value > protocol::ZWWM_LAYER_SHELL_V1_LAYER_OVERLAY ? protocol::ZWWM_LAYER_SHELL_V1_ERROR_INVALID_LAYER : protocol::ZWWM_LAYER_SHELL_V1_ERROR_ROLE, "invalid layer surface"); return; } auto* resource = client->create_resource(&protocol::zwwm_layer_surface_v1_interface, id, 1); auto* layer = resource == nullptr ? nullptr : new (std::nothrow) LayerSurfaceState; if (resource == nullptr || layer == nullptr) { if (resource != nullptr) resource->destroy(); client->post_no_memory(); return; } static std::uint64_t creation = 1; layer->resource = resource; layer->surface = surface; layer->output = output; layer->name_space = name_space == nullptr ? "" : name_space; layer->creation = creation++; layer->pending.layer = layer->current.layer = value; surface->layer_surface = layer; surface->layer_role_assigned = true; if (auto* owner = output_state(surface->observer, output); owner != nullptr) { owner->layer_roots[value].push_back(surface); reorder_layer_roots(surface->observer, output, value); } resource->set_data(layer); resource->set_handler(protocol::zwwm_layer_surface_v1_handler(ZwwmLayerSurfaceV1Handler{})); resource->set_destroy_handler([](zwayland::server::Resource& destroyed) { (layer_destroyed)(&destroyed); }); }
+struct ZwwmLayerShellV1Handler {
   void get_layer_surface(zwayland::server::Client& client, zwayland::server::Resource& resource, std::uint32_t id, zwayland::server::Resource* surface, zwayland::server::Resource* output, std::uint32_t layer, std::string name_space) {
     (layer_get_surface)(&client, &resource, id, surface, output, layer, name_space.c_str());
   }
@@ -128,7 +128,7 @@ struct XwlrLayerSurfaceV1KXwlrLayerSurfaceHandler {
 };
 void xwlr_get_layer_surface(zwayland::server::Client* client, zwayland::server::Resource* manager, std::uint32_t id, zwayland::server::Resource* layer_resource) {
   if (layer_resource == nullptr || layer_resource->client != client ||
-      layer_resource->interface != &protocol::zwlr_layer_surface_v1_interface ||
+       layer_resource->interface != &protocol::zwwm_layer_surface_v1_interface ||
       layer_resource->data<LayerSurfaceState>() == nullptr) { manager->post_error(protocol::XWLR_LAYER_SHELL_V1_ERROR_INVALID_LAYER_SURFACE, "not a zwwm layer surface for this client"); return; }
   auto* layer = layer_resource->data<LayerSurfaceState>();
   if (layer == nullptr || layer->xwlr != nullptr) { manager->post_error(protocol::XWLR_LAYER_SHELL_V1_ERROR_EXTENSION_EXISTS, "layer surface already has an extension"); return; }
@@ -157,10 +157,10 @@ void configure_layer_surface(LayerSurfaceState* layer, Rect geometry) {
   layer->serials.push_back(serial); layer->last_sent = serial;
   layer->configured_width = geometry.width; layer->configured_height = geometry.height;
   layer->configure_requested = false;
-  protocol::zwlr_layer_surface_v1_send_configure(*layer->resource, serial, geometry.width, geometry.height);
+  protocol::zwwm_layer_surface_v1_send_configure(*layer->resource, serial, geometry.width, geometry.height);
 }
 
-void bind_layer_shell(zwayland::server::Client* client, void* data, std::uint32_t version, std::uint32_t id) { auto* resource = client->create_resource(&protocol::zwlr_layer_shell_v1_interface, id, std::min(version, 4U)); if (resource == nullptr) { client->post_no_memory(); return; } resource->set_data(static_cast<Observer*>(data)); resource->set_handler(protocol::zwlr_layer_shell_v1_handler(ZwlrLayerShellV1KLayerShellHandler{})); }
+void bind_layer_shell(zwayland::server::Client* client, void* data, std::uint32_t, std::uint32_t id) { auto* resource = client->create_resource(&protocol::zwwm_layer_shell_v1_interface, id, 1); if (resource == nullptr) { client->post_no_memory(); return; } resource->set_data(static_cast<Observer*>(data)); resource->set_handler(protocol::zwwm_layer_shell_v1_handler(ZwwmLayerShellV1Handler{})); }
 void bind_xwlr_layer_shell(zwayland::server::Client* client, void*, std::uint32_t version, std::uint32_t id) { auto* resource = client->create_resource(&protocol::xwlr_layer_shell_v1_interface, id, std::min(version, 1U)); if (resource == nullptr) { client->post_no_memory(); return; } resource->set_handler(protocol::xwlr_layer_shell_v1_handler(XwlrLayerShellV1KXwlrLayerShellHandler{})); }
 
 }  // namespace zwwm::detail

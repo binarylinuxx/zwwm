@@ -114,7 +114,7 @@ protocol_specs = [
   ['zwwm-tags-unstable-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-tags-unstable-v1.xml')],
   ['zwwm-data-control-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-data-control-v1.xml')],
   ['wlr-data-control-unstable-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/wlr-data-control-unstable-v1.xml')],
-  ['wlr-layer-shell-unstable-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/wlr-layer-shell-unstable-v1.xml')],
+  ['zwwm-layer-shell-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-layer-shell-v1.xml')],
   ['xwlr-layer-shell-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/xwlr-layer-shell-v1.xml')],
   ['zwwm-screencopy-view-unstable-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-screencopy-view-unstable-v1.xml')],
   ['ext-zwwm-toplevels-unstable-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/ext-zwwm-toplevels-unstable-v1.xml')],
@@ -444,6 +444,9 @@ install_data(
   install_dir: get_option('datadir') / 'zwwm/shaders',
 )
 install_data('zwwm/data/zwwm.desktop', install_dir: get_option('datadir') / 'wayland-sessions')
+install_data('zwwm-protocols/protocols/zwwm-layer-shell-v1.xml',
+  'zwwm-protocols/protocols/xwlr-layer-shell-v1.xml',
+  install_dir: get_option('datadir') / 'zwwm/protocols')
 install_data(
   'LICENSE',
   install_dir: get_option('datadir') / 'doc/zwwm',

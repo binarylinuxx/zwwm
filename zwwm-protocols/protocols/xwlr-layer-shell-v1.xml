@@ -22,9 +22,9 @@
     DEALINGS IN THE SOFTWARE.
   </copyright>
   <interface name="xwlr_layer_shell_v1" version="1">
-    <description summary="zwwm layer-shell companion extension">This optional global augments an existing zwwm zwlr_layer_surface_v1; it does not replace the standard layer-shell protocol.</description>
+    <description summary="zwwm layer-shell companion extension">This optional global augments a zwwm_layer_surface_v1.</description>
     <enum name="error"><entry name="invalid_layer_surface" value="0" summary="object is not this client's zwwm layer surface"/><entry name="extension_exists" value="1" summary="layer surface already has an extension"/></enum>
-    <request name="get_layer_surface"><arg name="id" type="new_id" interface="xwlr_layer_surface_v1"/><arg name="layer_surface" type="object" interface="zwlr_layer_surface_v1"/></request>
+    <request name="get_layer_surface"><arg name="id" type="new_id" interface="xwlr_layer_surface_v1"/><arg name="layer_surface" type="object" interface="zwwm_layer_surface_v1"/></request>
     <request name="destroy" type="destructor"/>
   </interface>
   <interface name="xwlr_layer_surface_v1" version="1">

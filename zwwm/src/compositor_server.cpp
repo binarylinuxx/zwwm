@@ -19,7 +19,7 @@
 #include <zwwm-tags-unstable-v1-zwayland-server.h>
 #include <zwwm-data-control-v1-zwayland-server.h>
 #include <wlr-data-control-unstable-v1-zwayland-server.h>
-#include <wlr-layer-shell-unstable-v1-zwayland-server.h>
+#include <zwwm-layer-shell-v1-zwayland-server.h>
 #include <xwlr-layer-shell-v1-zwayland-server.h>
 #ifdef ZWWM_XWAYLAND
 #include <xwayland-shell-zwayland-server.h>
@@ -78,7 +78,7 @@ ProtocolGlobals& ProtocolGlobals::operator=(zwayland::server::Display* next) {
     display = next;
     viewporter = next->add_global(&protocol::wp_viewporter_interface, 1, [](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_viewporter)(&client, nullptr, bound_version, id); });
     fractional_scale_manager = next->add_global(&protocol::wp_fractional_scale_manager_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_fractional_scale_manager)(&client, data, bound_version, id); });
-    layer_shell = next->add_global(&protocol::zwlr_layer_shell_v1_interface, 4, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_layer_shell)(&client, data, bound_version, id); });
+    layer_shell = next->add_global(&protocol::zwwm_layer_shell_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_layer_shell)(&client, data, bound_version, id); });
     xwlr_layer_shell = next->add_global(&protocol::xwlr_layer_shell_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_xwlr_layer_shell)(&client, data, bound_version, id); });
     relative_pointer_manager = next->add_global(&protocol::zwp_relative_pointer_manager_v1_interface, 1, [data = observer->seat](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_relative_pointer_manager)(&client, data, bound_version, id); });
     idle_notifier = next->add_global(&protocol::ext_idle_notifier_v1_interface, 2, [data = observer->seat](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_idle_notifier)(&client, data, bound_version, id); });
@@ -282,10 +282,10 @@ void reorder_layer_roots(Observer* observer, OutputId output, std::uint32_t buck
 std::uint32_t reservation_edge(const LayerSurfaceState* layer) {
   if (layer->xwlr != nullptr && layer->xwlr->current_edge != 0) return layer->xwlr->current_edge;
   const auto anchor = layer->current.anchor;
-  constexpr auto top = protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP;
-  constexpr auto bottom = protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
-  constexpr auto left = protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT;
-  constexpr auto right = protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
+  constexpr auto top = protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_TOP;
+  constexpr auto bottom = protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
+  constexpr auto left = protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_LEFT;
+  constexpr auto right = protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_RIGHT;
   if (anchor == top || anchor == (top | left | right)) return top;
   if (anchor == bottom || anchor == (bottom | left | right)) return bottom;
   if (anchor == left || anchor == (left | top | bottom)) return left;
@@ -653,10 +653,10 @@ std::vector<layout::Placement> root_placements(const Observer* observer, const X
   return layout.arrange(roots, {{area.x, area.y}, {static_cast<std::uint32_t>(area.width), static_cast<std::uint32_t>(area.height)}}, weights);
 }
 Rect layer_geometry(const LayerState& state, Rect area) {
-  const bool left = (state.anchor & protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT) != 0;
-  const bool right = (state.anchor & protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT) != 0;
-  const bool top = (state.anchor & protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) != 0;
-  const bool bottom = (state.anchor & protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) != 0;
+  const bool left = (state.anchor & protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_LEFT) != 0;
+  const bool right = (state.anchor & protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_RIGHT) != 0;
+  const bool top = (state.anchor & protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_TOP) != 0;
+  const bool bottom = (state.anchor & protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_BOTTOM) != 0;
   const auto width = state.width == 0 ? std::max(1, area.width - state.left - state.right) : state.width;
   const auto height = state.height == 0 ? std::max(1, area.height - state.top - state.bottom) : state.height;
   return {left ? area.x + state.left : right ? area.x + area.width - width - state.right : area.x + (area.width - width) / 2,
@@ -682,8 +682,8 @@ Rect arrange_layers(Observer* observer, OutputId output) {
   Rect work{info.logical_x, info.logical_y, static_cast<std::int32_t>(info.logical_width),
             static_cast<std::int32_t>(info.logical_height)};
   const Rect full = work;
-  constexpr std::array<std::uint32_t, 4> order{protocol::ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, protocol::ZWLR_LAYER_SHELL_V1_LAYER_TOP,
-                                                 protocol::ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, protocol::ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND};
+  constexpr std::array<std::uint32_t, 4> order{protocol::ZWWM_LAYER_SHELL_V1_LAYER_OVERLAY, protocol::ZWWM_LAYER_SHELL_V1_LAYER_TOP,
+                                                 protocol::ZWWM_LAYER_SHELL_V1_LAYER_BOTTOM, protocol::ZWWM_LAYER_SHELL_V1_LAYER_BACKGROUND};
   // Reserve by layer, xwlr priority, then creation order.
   for (const auto bucket : order) {
     reorder_layer_roots(observer, output, bucket);
@@ -693,10 +693,10 @@ Rect arrange_layers(Observer* observer, OutputId output) {
       arrange_layer_surface(layer, work);
       const auto edge = reservation_edge(layer);
       const auto zone = layer->current.zone;
-      if (edge == protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) { const auto amount = zone + layer->current.top; work.y += amount; work.height = std::max(0, work.height - amount); }
-      else if (edge == protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM) work.height = std::max(0, work.height - zone - layer->current.bottom);
-      else if (edge == protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT) { const auto amount = zone + layer->current.left; work.x += amount; work.width = std::max(0, work.width - amount); }
-      else if (edge == protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT) work.width = std::max(0, work.width - zone - layer->current.right);
+      if (edge == protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_TOP) { const auto amount = zone + layer->current.top; work.y += amount; work.height = std::max(0, work.height - amount); }
+      else if (edge == protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_BOTTOM) work.height = std::max(0, work.height - zone - layer->current.bottom);
+      else if (edge == protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_LEFT) { const auto amount = zone + layer->current.left; work.x += amount; work.width = std::max(0, work.width - amount); }
+      else if (edge == protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_RIGHT) work.width = std::max(0, work.width - zone - layer->current.right);
     }
   }
   for (const auto bucket : order) for (auto* surface : state->layer_roots[bucket]) {
@@ -1116,9 +1116,9 @@ void notify_surface(SurfaceState* s) {
   if (auto* layer = root(s)->layer_surface; layer != nullptr) {
     view.layer_surface = true;
     view.layer = layer->current.layer;
-    const std::uint64_t rank = layer->current.layer == protocol::ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND ? 0ULL :
-                               layer->current.layer == protocol::ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM ? 1ULL :
-                               layer->current.layer == protocol::ZWLR_LAYER_SHELL_V1_LAYER_TOP ? 3ULL : 4ULL;
+    const std::uint64_t rank = layer->current.layer == protocol::ZWWM_LAYER_SHELL_V1_LAYER_BACKGROUND ? 0ULL :
+                               layer->current.layer == protocol::ZWWM_LAYER_SHELL_V1_LAYER_BOTTOM ? 1ULL :
+                               layer->current.layer == protocol::ZWWM_LAYER_SHELL_V1_LAYER_TOP ? 3ULL : 4ULL;
     view.scene_rank = static_cast<std::uint32_t>(rank);
     view.layer_priority = layer->xwlr == nullptr ? 0 : layer->xwlr->current_priority;
     view.root_order = layer->creation;
@@ -1599,11 +1599,11 @@ void surface_commit(zwayland::server::Client*, zwayland::server::Resource* r) {
     auto* layer = s->layer_surface;
     const auto& state = layer->pending;
     const auto anchor = state.anchor;
-    if ((state.width == 0 && (anchor & (protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT)) !=
-                                 (protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT)) ||
-        (state.height == 0 && (anchor & (protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM)) !=
-                                  (protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | protocol::ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM))) {
-      s->layer_surface->resource->post_error(protocol::ZWLR_LAYER_SURFACE_V1_ERROR_INVALID_SIZE,
+    if ((state.width == 0 && (anchor & (protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_LEFT | protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_RIGHT)) !=
+                                 (protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_LEFT | protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_RIGHT)) ||
+        (state.height == 0 && (anchor & (protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_TOP | protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_BOTTOM)) !=
+                                  (protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_TOP | protocol::ZWWM_LAYER_SURFACE_V1_ANCHOR_BOTTOM))) {
+      s->layer_surface->resource->post_error(protocol::ZWWM_LAYER_SURFACE_V1_ERROR_INVALID_SIZE,
                              "zero layer dimension requires opposite anchors");
       return;
     }
@@ -1615,7 +1615,7 @@ void surface_commit(zwayland::server::Client*, zwayland::server::Resource* r) {
     }
   }
   if (s->layer_surface != nullptr && s->pending_buffer != nullptr && !s->layer_surface->mapped && !s->layer_surface->configured) {
-    s->layer_surface->resource->post_error(protocol::ZWLR_LAYER_SURFACE_V1_ERROR_INVALID_SURFACE_STATE,
+    s->layer_surface->resource->post_error(protocol::ZWWM_LAYER_SURFACE_V1_ERROR_INVALID_SURFACE_STATE,
                            "buffer committed before layer configure was acknowledged");
     return;
   }
@@ -1961,9 +1961,9 @@ void create_surface(zwayland::server::Client* c, zwayland::server::Resource* com
 void associate_layer_popup(LayerSurfaceState* layer, zwayland::server::Client* client, zwayland::server::Resource* layer_resource,
                            zwayland::server::Resource* popup_resource) {
   auto* popup = popup_resource == nullptr ? nullptr : popup_resource->data<PopupState>();
-  if (layer == nullptr || layer->surface == nullptr || popup == nullptr || popup->xdg == nullptr || popup->xdg->surface == nullptr || popup->parent != nullptr || popup->layer_parent != nullptr || popup->dismissed || popup_resource->client != client || popup->xdg->resource->client != client) { layer_resource->post_error(protocol::ZWLR_LAYER_SURFACE_V1_ERROR_INVALID_SURFACE_STATE, "invalid layer popup"); return; }
+  if (layer == nullptr || layer->surface == nullptr || popup == nullptr || popup->xdg == nullptr || popup->xdg->surface == nullptr || popup->parent != nullptr || popup->layer_parent != nullptr || popup->dismissed || popup_resource->client != client || popup->xdg->resource->client != client) { layer_resource->post_error(protocol::ZWWM_LAYER_SURFACE_V1_ERROR_INVALID_SURFACE_STATE, "invalid layer popup"); return; }
   auto* child = popup->xdg->surface;
-  if (child->parent != nullptr) { layer_resource->post_error(protocol::ZWLR_LAYER_SURFACE_V1_ERROR_INVALID_SURFACE_STATE, "popup already has a parent"); return; }
+  if (child->parent != nullptr) { layer_resource->post_error(protocol::ZWWM_LAYER_SURFACE_V1_ERROR_INVALID_SURFACE_STATE, "popup already has a parent"); return; }
   popup->layer_parent = layer->surface; child->parent = layer->surface; child->above_parent = true; layer->surface->children.push_back(child); refresh_tree_stacking(layer->surface); send_popup_configure(popup);
 }
 void region_subtract(RegionState* region, Rect cut) {
@@ -2327,7 +2327,7 @@ void set_keyboard_focus(SeatState* seat, SurfaceState* next) {
   if (next != nullptr && root(next)->xdg_surface != nullptr && root(next)->xdg_surface->toplevel != nullptr && seat != nullptr && seat->keyboard_focus != nullptr) {
     const auto* current = root(seat->keyboard_focus);
     if (current != nullptr && *current->alive && current->layer_surface != nullptr && current->layer_surface->mapped &&
-        current->layer_surface->current.keyboard == protocol::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) return;
+        current->layer_surface->current.keyboard == protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) return;
   }
   if (seat == nullptr || seat->keyboard_focus == next) return;
   if (auto* constraint = active_constraint(seat);
@@ -2361,12 +2361,12 @@ void refresh_layer_keyboard_focus(Observer* observer) {
   auto* output = output_state(observer, observer->active_output);
   if (output == nullptr) return;
   SurfaceState* exclusive = nullptr;
-  for (const std::uint32_t bucket : {protocol::ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, protocol::ZWLR_LAYER_SHELL_V1_LAYER_TOP}) {
+  for (const std::uint32_t bucket : {protocol::ZWWM_LAYER_SHELL_V1_LAYER_OVERLAY, protocol::ZWWM_LAYER_SHELL_V1_LAYER_TOP}) {
     const auto& roots = output->layer_roots[bucket];
     for (auto it = roots.rbegin(); it != roots.rend(); ++it) {
       auto* surface = *it;
       if (surface->layer_surface != nullptr && surface->layer_surface->mapped &&
-          surface->layer_surface->current.keyboard == protocol::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
+          surface->layer_surface->current.keyboard == protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
         exclusive = surface;
         break;
       }
@@ -2378,7 +2378,7 @@ void refresh_layer_keyboard_focus(Observer* observer) {
   } else if (observer->seat->keyboard_focus != nullptr) {
     auto* focused = root(observer->seat->keyboard_focus);
     auto* layer = focused == nullptr ? nullptr : focused->layer_surface;
-    if (layer != nullptr && (!layer->mapped || layer->current.keyboard == protocol::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE)) {
+    if (layer != nullptr && (!layer->mapped || layer->current.keyboard == protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE)) {
       set_keyboard_focus(observer->seat, observer->seat->regular_focus);
     }
   }
@@ -2768,7 +2768,7 @@ void CompositorServer::set_outputs(std::vector<OutputInfo> outputs) {
     for (auto& roots : removed->layer_roots) for (auto* surface : roots) {
       auto* layer = surface == nullptr ? nullptr : surface->layer_surface;
       if (layer == nullptr || layer->output != removed->info.id) continue;
-      protocol::zwlr_layer_surface_v1_send_closed(*layer->resource);
+      protocol::zwwm_layer_surface_v1_send_closed(*layer->resource);
       layer->closed = true;
       layer->mapped = false;
       layer->configured = false;
@@ -2860,7 +2860,7 @@ void CompositorServer::set_outputs(std::vector<OutputInfo> outputs) {
     if (surface->layer_surface != nullptr && !output_exists(surface->layer_surface->output)) {
       auto* layer = surface->layer_surface;
       if (layer->output) {
-        if (!layer->closed) protocol::zwlr_layer_surface_v1_send_closed(*layer->resource);
+        if (!layer->closed) protocol::zwwm_layer_surface_v1_send_closed(*layer->resource);
         layer->closed = true;
         layer->mapped = false;
       } else if (impl_->active_output) {
@@ -3487,8 +3487,8 @@ SurfaceState* surface_at_global(const Observer* observer, std::int32_t x, std::i
     }
     return nullptr;
   };
-  if (auto* hit = hit_layer(protocol::ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY); hit != nullptr) return hit;
-  if (auto* hit = hit_layer(protocol::ZWLR_LAYER_SHELL_V1_LAYER_TOP); hit != nullptr) return hit;
+  if (auto* hit = hit_layer(protocol::ZWWM_LAYER_SHELL_V1_LAYER_OVERLAY); hit != nullptr) return hit;
+  if (auto* hit = hit_layer(protocol::ZWWM_LAYER_SHELL_V1_LAYER_TOP); hit != nullptr) return hit;
   const auto hit_window = [&](int category) -> SurfaceState* {
     SurfaceState* result = nullptr;
     std::uint64_t highest_order = 0;
@@ -3519,8 +3519,8 @@ SurfaceState* surface_at_global(const Observer* observer, std::int32_t x, std::i
   if (auto* hit = hit_window(2); hit != nullptr) return hit;
   if (auto* hit = hit_window(1); hit != nullptr) return hit;
   if (auto* hit = hit_window(0); hit != nullptr) return hit;
-  if (auto* hit = hit_layer(protocol::ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM); hit != nullptr) return hit;
-  if (auto* hit = hit_layer(protocol::ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND); hit != nullptr) return hit;
+  if (auto* hit = hit_layer(protocol::ZWWM_LAYER_SHELL_V1_LAYER_BOTTOM); hit != nullptr) return hit;
+  if (auto* hit = hit_layer(protocol::ZWWM_LAYER_SHELL_V1_LAYER_BACKGROUND); hit != nullptr) return hit;
   return nullptr;
 }
 bool managed_surface(const SurfaceState* surface) {
@@ -3571,10 +3571,10 @@ void route_pointer_motion(SeatState* seat, std::uint32_t time, SurfaceState* hit
     auto* current_root = root(seat->keyboard_focus);
     const bool exclusive_active = current_root != nullptr && current_root->layer_surface != nullptr &&
         current_root->layer_surface->mapped &&
-        current_root->layer_surface->current.keyboard == protocol::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE &&
-        current_root->layer_surface->current.layer >= protocol::ZWLR_LAYER_SHELL_V1_LAYER_TOP;
+        current_root->layer_surface->current.keyboard == protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE &&
+        current_root->layer_surface->current.layer >= protocol::ZWWM_LAYER_SHELL_V1_LAYER_TOP;
     const bool target_accepts_keyboard = hover_root->layer_surface == nullptr ||
-        hover_root->layer_surface->current.keyboard != protocol::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
+        hover_root->layer_surface->current.keyboard != protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
     if (!exclusive_active && target_accepts_keyboard) {
       auto* old_focus = seat->toplevel_focus;
       set_keyboard_focus(seat, hover_root);
@@ -3946,7 +3946,7 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
     if (managed && (floating || endless_canvas(&impl_->observer))) raise_root(target_root);
   }
   const bool background = target == nullptr || (target_root != nullptr && target_root->layer_surface != nullptr &&
-      target_root->layer_surface->current.layer == protocol::ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND);
+      target_root->layer_surface->current.layer == protocol::ZWWM_LAYER_SHELL_V1_LAYER_BACKGROUND);
   if (state == protocol::WL_POINTER_BUTTON_STATE_PRESSED && button == BTN_LEFT && background &&
       seat.session_lock == nullptr && endless_canvas(&impl_->observer)) {
     auto* output = output_state(&impl_->observer, impl_->active_output);
@@ -4108,12 +4108,12 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
     seat.pressed_buttons.push_back(button);
     SurfaceState* toplevel = root(target);
     const bool keyboard_allowed = toplevel == nullptr || toplevel->layer_surface == nullptr ||
-                                   toplevel->layer_surface->current.keyboard != protocol::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
+                                    toplevel->layer_surface->current.keyboard != protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
     auto* current_root = root(seat.keyboard_focus);
     const bool exclusive_active = current_root != nullptr && current_root->layer_surface != nullptr &&
         current_root->layer_surface->mapped &&
-        current_root->layer_surface->current.keyboard == protocol::ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE &&
-        current_root->layer_surface->current.layer >= protocol::ZWLR_LAYER_SHELL_V1_LAYER_TOP;
+        current_root->layer_surface->current.keyboard == protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE &&
+        current_root->layer_surface->current.layer >= protocol::ZWWM_LAYER_SHELL_V1_LAYER_TOP;
     if (keyboard_allowed && (!exclusive_active || current_root == toplevel) && seat.keyboard_focus != toplevel) {
       SurfaceState* old_focus = seat.toplevel_focus;
       set_keyboard_focus(&seat, toplevel);

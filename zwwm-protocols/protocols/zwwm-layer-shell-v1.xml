@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="zwwm_layer_shell_v1">
+  <copyright>
+    Copyright 2026 zwwm contributors
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <interface name="zwwm_layer_shell_v1" version="1">
+    <description summary="create desktop layer surfaces">
+      Assigns a layer role to an uncommitted wl_surface. Layers are ordered
+      background, bottom, top, overlay. Ordinary windows lie between bottom
+      and top. Each layer surface belongs to an output, chosen by the compositor
+      when output is null. The initial wl_surface commit must have no buffer;
+      the client must wait for configure and acknowledge it before mapping.
+    </description>
+    <request name="get_layer_surface">
+      <arg name="id" type="new_id" interface="zwwm_layer_surface_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+      <arg name="output" type="object" interface="wl_output" allow-null="true"/>
+      <arg name="layer" type="uint" enum="layer"/>
+      <arg name="name_space" type="string"/>
+    </request>
+    <request name="destroy" type="destructor"/>
+    <enum name="error">
+      <entry name="role" value="0"/>
+      <entry name="invalid_layer" value="1"/>
+      <entry name="already_constructed" value="2"/>
+    </enum>
+    <enum name="layer">
+      <entry name="background" value="0"/>
+      <entry name="bottom" value="1"/>
+      <entry name="top" value="2"/>
+      <entry name="overlay" value="3"/>
+    </enum>
+  </interface>
+
+  <interface name="zwwm_layer_surface_v1" version="1">
+    <description summary="double-buffered layer surface state">
+      Size, anchors, exclusive zone, margins, keyboard mode, and layer are
+      applied together on wl_surface.commit. A null buffer unmaps the surface;
+      remapping requires another bufferless commit and configure exchange.
+      A zero dimension requires anchors on both opposite edges of that axis.
+      Positive exclusive zones reserve space when anchored to one edge (or
+      that edge and both perpendicular edges). Zone zero avoids reserved space;
+      zone -1 permits extending underneath it.
+    </description>
+    <request name="set_size">
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+    </request>
+    <request name="set_anchor">
+      <arg name="anchor" type="uint" enum="anchor"/>
+    </request>
+    <request name="set_exclusive_zone">
+      <arg name="zone" type="int"/>
+    </request>
+    <request name="set_margin">
+      <arg name="top" type="int"/>
+      <arg name="right" type="int"/>
+      <arg name="bottom" type="int"/>
+      <arg name="left" type="int"/>
+    </request>
+    <request name="set_keyboard_interactivity">
+      <arg name="keyboard_interactivity" type="uint" enum="keyboard_interactivity"/>
+    </request>
+    <request name="get_popup">
+      <arg name="popup" type="object" interface="xdg_popup"/>
+    </request>
+    <request name="ack_configure">
+      <arg name="serial" type="uint"/>
+    </request>
+    <request name="destroy" type="destructor"/>
+    <request name="set_layer">
+      <arg name="layer" type="uint" enum="zwwm_layer_shell_v1.layer"/>
+    </request>
+    <event name="configure">
+      <arg name="serial" type="uint"/>
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+    </event>
+    <event name="closed"/>
+    <enum name="error">
+      <entry name="invalid_surface_state" value="0"/>
+      <entry name="invalid_size" value="1"/>
+      <entry name="invalid_anchor" value="2"/>
+      <entry name="invalid_keyboard_interactivity" value="3"/>
+    </enum>
+    <enum name="anchor" bitfield="true">
+      <entry name="top" value="1"/>
+      <entry name="bottom" value="2"/>
+      <entry name="left" value="4"/>
+      <entry name="right" value="8"/>
+    </enum>
+    <enum name="keyboard_interactivity">
+      <entry name="none" value="0"/>
+      <entry name="exclusive" value="1"/>
+      <entry name="on_demand" value="2"/>
+    </enum>
+  </interface>
+</protocol>
