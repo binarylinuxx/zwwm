@@ -50,12 +50,13 @@ int main(int argc, char** argv) {
   for (int index = 1; index < argc; ++index) {
     const std::string argument(argv[index]);
     if (argument == "--portal-helper" && index + 1 < argc) portal_executable = argv[++index];
+    else if (argument == "--no-portal") portal_executable.clear();
     else if (argument == "--version") {
       std::printf("zwwm %s\n", ZWWM_VERSION);
       return EXIT_SUCCESS;
     }
     else {
-      std::fprintf(stderr, "usage: %s [--portal-helper PATH] [--version]\n", argv[0]);
+      std::fprintf(stderr, "usage: %s [--portal-helper PATH | --no-portal] [--version]\n", argv[0]);
       return EXIT_FAILURE;
     }
   }
@@ -94,7 +95,6 @@ int main(int argc, char** argv) {
   struct StartupState {
     zwayland::server::EventLoop* loop;
     decltype(run_startup_commands)* start;
-    zwwm::PortalCapture* portal = nullptr;
     bool presented = false;
     bool armed = false;
     bool scheduled = false;
@@ -106,12 +106,19 @@ int main(int argc, char** argv) {
     }
     void on_frame() {
       presented = true;
-      if (portal != nullptr) portal->frame_presented();
       schedule();
     }
   } startup{event_loop, &run_startup_commands};
+  struct PresentationState {
+    StartupState* startup;
+    zwwm::PortalCapture* portal = nullptr;
+  } presentation{&startup};
   compositor_server.set_presentation_observer(
-      [](void* data) { static_cast<StartupState*>(data)->on_frame(); }, &startup);
+      [](void* data) {
+        auto* state = static_cast<PresentationState*>(data);
+        state->startup->on_frame();
+        if (state->portal != nullptr) state->portal->frame_presented();
+      }, &presentation);
 
   zwwm::NestedBackend nested_backend(event_loop, loaded.config);
   struct ConfigTargets {
@@ -218,7 +225,8 @@ int main(int argc, char** argv) {
           static_cast<zwwm::NestedBackend*>(data)->present(buffer);
         },
         &nested_backend);
-    auto portal_capture = std::make_unique<zwwm::PortalCapture>(display, event_loop,
+    std::unique_ptr<zwwm::PortalCapture> portal_capture;
+    if (!portal_executable.empty()) portal_capture = std::make_unique<zwwm::PortalCapture>(display, event_loop,
           [&nested_backend](zwwm::OutputCapture& output, bool cursor, std::uint64_t target) {
             return target == 0 ? nested_backend.capture_output(output, cursor) :
                                  nested_backend.capture_toplevel(target, output, cursor);
@@ -229,17 +237,15 @@ int main(int argc, char** argv) {
            [&compositor_server](zwayland::server::Client* client, zwwm::OutputId output) { return compositor_server.output_resource(client, output); },
             [&compositor_server](zwayland::server::Resource* resource) { return compositor_server.output_info(compositor_server.output_id(resource)); }, false,
             [&compositor_server](zwayland::server::Client* client) { compositor_server.set_portal_client(client); });
+    if (portal_capture != nullptr) {
       compositor_server.set_toplevel_observer([](void* data) { static_cast<zwwm::PortalCapture*>(data)->toplevels_changed(); }, portal_capture.get());
-       startup.portal = portal_capture.get();
       if (!portal_capture->spawn(portal_executable)) {
         std::fprintf(stderr, "zwwm: %s\n", portal_capture->last_error().c_str());
         compositor_server.set_toplevel_observer(nullptr, nullptr);
-        compositor_server.set_presentation_observer(nullptr, nullptr);
         portal_capture.reset();
-        nested_backend.stop();
-         manager_protocol.reset();
-         return EXIT_FAILURE;
+      }
     }
+    presentation.portal = portal_capture.get();
     if (!loaded.error.empty()) nested_backend.show_error(loaded.error);
     std::printf("zwwm: using nested Wayland backend\n");
     std::printf("zwwm: listening on WAYLAND_DISPLAY=%s\n", socket.c_str());
@@ -284,7 +290,8 @@ int main(int argc, char** argv) {
           static_cast<zwwm::RuntimeBackend*>(data)->present(buffer);
         },
         &drm_backend);
-    auto portal_capture = std::make_unique<zwwm::PortalCapture>(display, event_loop,
+    std::unique_ptr<zwwm::PortalCapture> portal_capture;
+    if (!portal_executable.empty()) portal_capture = std::make_unique<zwwm::PortalCapture>(display, event_loop,
           [&drm_backend](zwwm::OutputCapture& output, bool cursor, std::uint64_t target) {
             return target == 0 ? drm_backend.capture_output(output, cursor) :
                                  drm_backend.capture_toplevel(target, output, cursor);
@@ -296,17 +303,15 @@ int main(int argc, char** argv) {
            [&compositor_server](zwayland::server::Resource* resource) { return compositor_server.output_info(compositor_server.output_id(resource)); },
             drm_backend.supports_embedded_cursor(),
             [&compositor_server](zwayland::server::Client* client) { compositor_server.set_portal_client(client); });
+    if (portal_capture != nullptr) {
       compositor_server.set_toplevel_observer([](void* data) { static_cast<zwwm::PortalCapture*>(data)->toplevels_changed(); }, portal_capture.get());
-       startup.portal = portal_capture.get();
       if (!portal_capture->spawn(portal_executable)) {
         std::fprintf(stderr, "zwwm: %s\n", portal_capture->last_error().c_str());
         compositor_server.set_toplevel_observer(nullptr, nullptr);
-        compositor_server.set_presentation_observer(nullptr, nullptr);
         portal_capture.reset();
-        drm_backend.stop();
-        manager_protocol.reset();
-        return EXIT_FAILURE;
+      }
     }
+    presentation.portal = portal_capture.get();
     std::printf("zwwm: using direct DRM backend\n");
     std::printf("zwwm: listening on WAYLAND_DISPLAY=%s\n", socket.c_str());
     std::fflush(stdout);

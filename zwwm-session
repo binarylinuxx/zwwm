@@ -21,6 +21,9 @@ fi
 compositor="$bin_dir/zwwm"
 portal="$bin_dir/xdg-desktop-portal-zwwm"
 if [[ ! -x "$compositor" ]]; then compositor=$(command -v zwwm) || exit 127; fi
-if [[ ! -x "$portal" ]]; then portal=$(command -v xdg-desktop-portal-zwwm) || exit 127; fi
+if [[ ! -x "$portal" ]]; then portal=$(command -v xdg-desktop-portal-zwwm || true); fi
 
-exec "$compositor" --portal-helper "$portal" "$@"
+if [[ -n "$portal" ]]; then
+  exec "$compositor" --portal-helper "$portal" "$@"
+fi
+exec "$compositor" --no-portal "$@"

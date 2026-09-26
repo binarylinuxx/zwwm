@@ -504,8 +504,9 @@ This runtime override is not written back to `config.zw`.
 ## Autostart
 
 `exec-sh-on-startup` runs commands once after zwwm initializes its backend,
-Wayland socket, Xwayland integration, and portal helper. Commands inherit the
-configured environment, `WAYLAND_DISPLAY`, and, when enabled, `DISPLAY`.
+Wayland socket, and Xwayland integration, then presents its first frame. It does
+not require the optional portal helper. Commands inherit the configured
+environment, `WAYLAND_DISPLAY`, and, when enabled, `DISPLAY`.
 
 ```zw
 PANEL = "waybar"
