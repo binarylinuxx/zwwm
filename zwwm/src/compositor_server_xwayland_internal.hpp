@@ -25,6 +25,7 @@ struct XwaylandWindow {
   std::uint16_t width = 1, height = 1;
   Rect requested_bounds{0, 0, 1, 1};
   bool mapped = false;
+  bool ever_mapped = false;
   bool override_redirect = false;
   bool position_specified = false;
   bool supports_delete = false;

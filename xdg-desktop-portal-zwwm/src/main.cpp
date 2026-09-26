@@ -9,7 +9,6 @@
 #include <QDBusInterface>
 #include <QDBusMetaType>
 #include <QDBusReply>
-#include <QDBusVariant>
 #include <QMap>
 #include <QTimer>
 
@@ -42,31 +41,28 @@ bool publishActivationEnvironment() {
   if (!busReply.isValid()) return false;
 
   QDBusInterface systemd(QStringLiteral("org.freedesktop.systemd1"),
-                         QStringLiteral("/org/freedesktop/systemd1"),
-                         QStringLiteral("org.freedesktop.systemd1.Manager"),
-                         QDBusConnection::sessionBus());
-  const QDBusReply<void> systemdReply = systemd.call(QStringLiteral("SetEnvironment"),
-                                                     assignments);
-  if (!systemdReply.isValid()) return false;
-  systemd.call(QStringLiteral("ResetFailedUnit"),
-               QStringLiteral("xdg-desktop-portal-gtk.service"));
+                          QStringLiteral("/org/freedesktop/systemd1"),
+                          QStringLiteral("org.freedesktop.systemd1.Manager"),
+                          QDBusConnection::sessionBus());
+  if (systemd.isValid()) {
+    const QDBusReply<void> systemdReply = systemd.call(QStringLiteral("SetEnvironment"),
+                                                       assignments);
+    if (!systemdReply.isValid()) return false;
+    systemd.call(QStringLiteral("ResetFailedUnit"),
+                 QStringLiteral("xdg-desktop-portal-gtk.service"));
+  }
   return true;
 }
 
 void refreshPublicPortal() {
-  QDBusInterface properties(QStringLiteral("org.freedesktop.portal.Desktop"),
-                            QStringLiteral("/org/freedesktop/portal/desktop"),
-                            QStringLiteral("org.freedesktop.DBus.Properties"),
-                            QDBusConnection::sessionBus());
-  const QDBusReply<QDBusVariant> sources = properties.call(
-      QStringLiteral("Get"), QStringLiteral("org.freedesktop.portal.ScreenCast"),
-      QStringLiteral("AvailableSourceTypes"));
-  if (sources.isValid() && sources.value().variant().toUInt() == 3U) return;
-
+  // Another backend can advertise the same source mask. Restart the frontend
+  // after publishing this session's desktop and portal lookup paths so it
+  // actually selects zwwm instead of retaining an earlier backend.
   QDBusInterface systemd(QStringLiteral("org.freedesktop.systemd1"),
-                         QStringLiteral("/org/freedesktop/systemd1"),
-                         QStringLiteral("org.freedesktop.systemd1.Manager"),
-                         QDBusConnection::sessionBus());
+                          QStringLiteral("/org/freedesktop/systemd1"),
+                          QStringLiteral("org.freedesktop.systemd1.Manager"),
+                          QDBusConnection::sessionBus());
+  if (!systemd.isValid()) return;
   systemd.asyncCall(QStringLiteral("RestartUnit"), QStringLiteral("xdg-desktop-portal.service"),
                     QStringLiteral("replace"));
 }

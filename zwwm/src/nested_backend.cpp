@@ -66,6 +66,7 @@ struct NestedBackend::Window {
   bool content_ready = false;
   bool suppress_geometry_animation = false;
   bool track_geometry_animation = false;
+  bool camera_motion = false;
   double camera_scale = 1.0;
   std::int32_t camera_center_x = 0, camera_center_y = 0;
   double camera_offset_x = 0.0, camera_offset_y = 0.0;
@@ -645,6 +646,7 @@ void NestedBackend::present(const ShmBufferView& buffer) {
       window.removed = false; window.tag_outgoing = false;
        window.suppress_geometry_animation = buffer.suppress_geometry_animation;
        window.track_geometry_animation = buffer.track_geometry_animation;
+       window.camera_motion = buffer.camera_motion;
        window.camera_scale = buffer.camera_scale;
        window.camera_center_x = buffer.camera_center_x;
        window.camera_center_y = buffer.camera_center_y;
@@ -771,6 +773,7 @@ void NestedBackend::present(const ShmBufferView& buffer) {
   window.fullscreen = buffer.fullscreen;
   window.suppress_geometry_animation = buffer.suppress_geometry_animation;
   window.track_geometry_animation = buffer.track_geometry_animation;
+  window.camera_motion = buffer.camera_motion;
   window.camera_scale = buffer.camera_scale;
   window.camera_center_x = buffer.camera_center_x;
   window.camera_center_y = buffer.camera_center_y;
@@ -882,11 +885,14 @@ void NestedBackend::repaint_gpu() {
     if (window.toplevel && !window.removed && window.content_ready && window.texture != 0)
       animation_targets.push_back({window.id, bounds,
                                      !window.suppress_geometry_animation,
-                                     !tag || window.tag_outgoing,
-                                     window.track_geometry_animation});
+                                      !tag || window.tag_outgoing,
+                                      window.track_geometry_animation, window.camera_motion});
   }
   animations_.update(animation_targets, now);
-  for (auto& window : windows_) window.track_geometry_animation = false;
+  for (auto& window : windows_) {
+    window.track_geometry_animation = false;
+    window.camera_motion = false;
+  }
   for (auto it = windows_.begin(); it != windows_.end();) {
     if (it->removed && !animations_.retains(it->root_id)) {
       if (it->dmabuf_texture && it->texture != 0 && renderer_->importer != nullptr)
@@ -1076,11 +1082,16 @@ void NestedBackend::repaint() {
     if (window.toplevel && !window.removed && window.content_ready && !window.pixels.empty())
       animation_targets.push_back({window.id, bounds,
                                      !window.suppress_geometry_animation,
-                                     !tag || window.tag_outgoing,
-                                     window.track_geometry_animation});
+                                      !tag || window.tag_outgoing,
+                                      window.track_geometry_animation, window.camera_motion});
   }
+  const bool camera_moved = std::any_of(windows_.begin(), windows_.end(),
+      [](const Window& window) { return window.camera_motion; });
   animations_.update(animation_targets, now);
-  for (auto& window : windows_) window.track_geometry_animation = false;
+  for (auto& window : windows_) {
+    window.track_geometry_animation = false;
+    window.camera_motion = false;
+  }
   windows_.erase(std::remove_if(windows_.begin(), windows_.end(), [&](const Window& window) {
                    return window.removed && !animations_.retains(window.root_id);
                  }),
@@ -1133,7 +1144,7 @@ void NestedBackend::repaint() {
       dirty_bottom = std::max(dirty_bottom, content_y + (relative_y + window.damage_y + window.damage_height + 1) * content_h / goal_h);
     }
   }
-  if (animation_active || tag_cleanup) {
+  if (animation_active || tag_cleanup || camera_moved) {
     dirty_left = 0;
     dirty_top = 0;
     dirty_right = static_cast<int>(logical_width_);

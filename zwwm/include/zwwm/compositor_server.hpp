@@ -64,6 +64,7 @@ struct ShmBufferView {
   bool suppress_geometry_animation = false;
   // Follow moving endless-canvas targets.
   bool track_geometry_animation = false;
+  bool camera_motion = false;
   double camera_scale = 1.0;
   std::int32_t camera_center_x = 0;
   std::int32_t camera_center_y = 0;

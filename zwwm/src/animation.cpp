@@ -150,7 +150,7 @@ void AnimationSystem::update(std::span<const AnimationTarget> targets, std::uint
     auto item = states_.find(target.id);
     if (item == states_.end()) {
       State state{target.bounds, target.bounds};
-      if (target.animate_presence && config_.enabled && config_.duration_ms != 0 &&
+       if (!target.camera_motion && target.animate_presence && config_.enabled && config_.duration_ms != 0 &&
           config_.open_window) {
         state.from = transformed(target.bounds, config_.open_scale_per_mille / 1000.0,
                                  static_cast<double>(config_.open_offset_px));
@@ -168,6 +168,12 @@ void AnimationSystem::update(std::span<const AnimationTarget> targets, std::uint
     state.present = true;
     state.target = target.bounds;
     state.target_opacity = 1.0F;
+    if (target.camera_motion) {
+      state.from = target.bounds;
+      state.from_opacity = 1.0F;
+      state.transition = Transition::idle;
+      continue;
+    }
     if (!target.animate && !target.track &&
         (state.transition == Transition::tracking || state.transition == Transition::resizing)) {
       state.from = target.bounds;

@@ -242,6 +242,7 @@ std::optional<KeyAction> key_action(std::string_view text) {
   if (text == "movetotag") return KeyAction::movetotag;
   if (text == "zoomin") return KeyAction::zoomin;
   if (text == "zoomout") return KeyAction::zoomout;
+  if (text == "movecluster") return KeyAction::movecluster;
   return std::nullopt;
 }
 

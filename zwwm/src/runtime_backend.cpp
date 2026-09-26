@@ -209,6 +209,7 @@ struct RuntimeBackend::DrmOutput {
     bool content_ready = false;
     bool suppress_geometry_animation = false;
     bool track_geometry_animation = false;
+    bool camera_motion = false;
     double camera_scale = 1.0;
     std::int32_t camera_center_x = 0, camera_center_y = 0;
     double camera_offset_x = 0.0, camera_offset_y = 0.0;
@@ -816,6 +817,7 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
         updated.removed = closing; updated.tag_outgoing = false;
         updated.suppress_geometry_animation = buffer.suppress_geometry_animation;
         updated.track_geometry_animation = buffer.track_geometry_animation;
+        updated.camera_motion = buffer.camera_motion;
         updated.camera_scale = buffer.camera_scale;
         updated.camera_center_x = buffer.camera_center_x;
         updated.camera_center_y = buffer.camera_center_y;
@@ -924,6 +926,7 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
     updated.fullscreen = buffer.fullscreen;
     updated.suppress_geometry_animation = buffer.suppress_geometry_animation;
     updated.track_geometry_animation = buffer.track_geometry_animation;
+    updated.camera_motion = buffer.camera_motion;
     updated.camera_scale = buffer.camera_scale;
     updated.camera_center_x = buffer.camera_center_x;
     updated.camera_center_y = buffer.camera_center_y;
@@ -1298,10 +1301,13 @@ void RuntimeBackend::repaint(DrmOutput& card) {
     if (surface.toplevel && !surface.removed && surface.content_ready && surface.texture != 0)
       animation_targets.push_back(
           {surface.id, bounds, !surface.suppress_geometry_animation,
-            !tag || surface.tag_outgoing, surface.track_geometry_animation});
+            !tag || surface.tag_outgoing, surface.track_geometry_animation, surface.camera_motion});
   }
   card.animations.update(animation_targets, now);
-  for (auto& surface : card.shm_textures) surface.track_geometry_animation = false;
+  for (auto& surface : card.shm_textures) {
+    surface.track_geometry_animation = false;
+    surface.camera_motion = false;
+  }
   for (auto it = card.shm_textures.begin(); it != card.shm_textures.end();) {
     if (it->removed && !card.animations.retains(it->root_id)) {
       if (it->texture != 0 && it->owns_texture) glDeleteTextures(1, &it->texture);

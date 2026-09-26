@@ -113,6 +113,7 @@ bind = $MOD, scrollback, zoomin, ""
 bind = $MOD, scrollforward, zoomout, ""
 bind = $MOD, "1", tag, "1"
 bind = $MOD, Left, focus, "left"
+bind = $MOD, G, movecluster, ""
 bind = , Home, exec, "jes-cli screenpicker"
 ```
 
@@ -121,7 +122,8 @@ bind = , Home, exec, "jes-cli screenpicker"
 | `exec` | Shell command | Runs `sh -c ARGUMENT`, resolving `sh` through `PATH`. |
 | `reload` | Ignored | Reloads the active configuration. |
 | `exit` | Ignored | Exits zwwm. |
-| `focus` | Empty or `"left"`, `"right"`, `"up"`, `"down"` | Empty cycles focus. A direction selects the nearest visible window in that direction on the same output. Canvas navigation uses world coordinates and is independent of camera pan and zoom. |
+| `focus` | Empty or `"left"`, `"right"`, `"up"`, `"down"` | Empty cycles focus. A direction selects the nearest visible window on the same output and centers the canvas camera on it. Click and Tab focus do not recenter. |
+| `movecluster` | Empty | Arm the focused canvas window and its connected nearby windows; left-drag moves the group together. Press again before dragging to cancel. |
 | `killactive` | Ignored | Requests that the focused window close. |
 | `killsession` | Ignored | Terminates the compositor session, currently equivalent to `exit`. |
 | `togglefloating` | Ignored | Toggles the focused window between tiled and floating. |
@@ -365,8 +367,11 @@ apply normally; `master-count` and `master-ratio` only affect `master-stack`.
 coordinates instead of fitting them into the output work area. Drag an empty
 background with the left mouse button to pan the active output and tag. Existing
 Super+left window dragging moves a window in world space, while Super+right
-resizes it. Window movement and viewport panning use the configured window
-geometry animation.
+resizes it. Camera panning follows the pointer without per-window geometry easing.
+`movecluster` groups the focused window with transitively nearby windows on its
+output and tag; after pressing the shortcut, left-drag to move that group. A
+new top-level window (but not its child or transient dialogs) also recenters
+the camera when first mapped.
 
 While a window is moved, its edges magnetically snap beside visible windows on
 the same output and tag. The resulting separation is `inner-gap`. The capture

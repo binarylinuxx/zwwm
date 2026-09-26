@@ -167,6 +167,7 @@ struct ProtocolGlobals {
 };
 
 struct SeatState {
+  struct ClusterMember { std::uint64_t id = 0; CanvasBounds start; };
   ~SeatState();
   ProtocolGlobals display;
   xkb_context* xkb_context_handle = nullptr;
@@ -209,6 +210,11 @@ struct SeatState {
   bool compositor_interactive = false;
   bool tiled_resize = false;
   bool canvas_panning = false;
+  bool cluster_armed = false;
+  bool canvas_cluster_dragging = false;
+  std::vector<ClusterMember> cluster_members;
+  OutputId cluster_output;
+  std::uint8_t cluster_tag = 0;
   std::uint32_t interactive_button = 0;
   OutputId interactive_output;
   std::uint64_t weight_before = 0, weight_after = 0;
@@ -283,6 +289,7 @@ void bind_seat(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
 void notify_surface(SurfaceState* surface);
 void notify_surface_tree(SurfaceState* surface);
 void configure_layout(Observer* observer, XdgSurfaceState* candidate = nullptr);
+bool recenter_canvas_on_surface(Observer* observer, SurfaceState* surface);
 void end_interactive(SeatState* seat);
 void set_pointer_focus(SeatState* seat, SurfaceState* next, std::int32_t x, std::int32_t y);
 void set_keyboard_focus(SeatState* seat, SurfaceState* next);

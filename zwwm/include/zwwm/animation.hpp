@@ -42,6 +42,8 @@ struct AnimationTarget {
   bool animate_presence = true;
   // Track continuously moving geometry.
   bool track = false;
+  // Camera-driven geometry follows one shared viewport, never per-window easing.
+  bool camera_motion = false;
 };
 
 struct AnimationSample {

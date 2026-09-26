@@ -5,4 +5,22 @@ export XDG_CURRENT_DESKTOP=zwwm
 export XDG_SESSION_DESKTOP=zwwm
 export XDG_SESSION_TYPE=wayland
 
-exec zwwm --portal-helper xdg-desktop-portal-zwwm "$@"
+bin_dir=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")
+data_dir="$(dirname -- "$bin_dir")/share"
+portal_dir="$data_dir/xdg-desktop-portal/portals"
+
+if [[ -d "$portal_dir" ]]; then
+  if [[ ":${XDG_DATA_DIRS:-}:" != *":$data_dir:"* ]]; then
+    export XDG_DATA_DIRS="$data_dir${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+  fi
+  if [[ "$bin_dir" == /nix/store/* && ":${NIX_XDG_DESKTOP_PORTAL_DIR:-}:" != *":$portal_dir:"* ]]; then
+    export NIX_XDG_DESKTOP_PORTAL_DIR="$portal_dir${NIX_XDG_DESKTOP_PORTAL_DIR:+:$NIX_XDG_DESKTOP_PORTAL_DIR}"
+  fi
+fi
+
+compositor="$bin_dir/zwwm"
+portal="$bin_dir/xdg-desktop-portal-zwwm"
+if [[ ! -x "$compositor" ]]; then compositor=$(command -v zwwm) || exit 127; fi
+if [[ ! -x "$portal" ]]; then portal=$(command -v xdg-desktop-portal-zwwm) || exit 127; fi
+
+exec "$compositor" --portal-helper "$portal" "$@"

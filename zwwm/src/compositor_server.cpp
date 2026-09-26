@@ -174,6 +174,7 @@ struct XdgSurfaceState {
   std::uint64_t commit_count = 0, ack_commit_count = 0, size_ack_commit_count = 0;
   std::uint32_t decoration_preference = 0;
   bool mapped = false;
+  bool ever_mapped = false;
   bool ever_committed = false;
   bool has_acked_configure = false;
   bool size_configure_acked = false;
@@ -721,6 +722,42 @@ void configure_canvas_frame(Observer* observer, OutputId output) {
         .output = output, .camera_frame = true, .camera_frame_ready = true,
         .window_shader = {}, .border_shader = {}});
 }
+bool recenter_canvas_on_surface(Observer* observer, SurfaceState* surface) {
+  if (!endless_canvas(observer) || surface == nullptr || surface->parent != nullptr) return false;
+  const CanvasBounds* bounds = nullptr;
+  OutputId output_id;
+  std::uint8_t tag = 0;
+  if (auto* x = surface->xdg_surface; x != nullptr && x->toplevel != nullptr &&
+      x->mapped && !x->fullscreen && x->canvas_bounds.initialized) {
+    bounds = &x->canvas_bounds;
+    output_id = x->output;
+    tag = x->tag;
+  }
+#ifdef ZWWM_XWAYLAND
+  else if (auto* x = surface->xwayland_surface; x != nullptr && x->window != nullptr &&
+           x->window->mapped && !x->fullscreen && x->canvas_bounds.initialized) {
+    bounds = &x->canvas_bounds;
+    output_id = x->output;
+    tag = x->tag;
+  }
+#endif
+  if (bounds == nullptr) return false;
+  auto* output = output_state(observer, output_id);
+  if (output == nullptr || output->active_tag != tag) return false;
+  const auto work = output_work(observer, output_id);
+  auto& viewport = output->canvas_viewports[tag - 1];
+  const double x = bounds->x + bounds->width * 0.5 - work.width / (2.0 * viewport.scale);
+  const double y = bounds->y + bounds->height * 0.5 - work.height / (2.0 * viewport.scale);
+  if (viewport.x == x && viewport.y == y) return false;
+  observer->camera.stop();
+  observer->camera_output = output_id;
+  observer->camera_tag = tag;
+  viewport.x = x;
+  viewport.y = y;
+  configure_canvas_frame(observer, output_id);
+  if (observer->event_callback != nullptr) observer->event_callback(observer->event_data, "camera");
+  return true;
+}
 void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
   if (observer == nullptr || observer->surfaces == nullptr) return;
   const auto border = observer->config->border_width();
@@ -1131,6 +1168,7 @@ void notify_surface(SurfaceState* s) {
       (zoom_frame || (canvas_window && !canvas_interaction) ||
        (seat->interactive != nullptr && !canvas_interaction));
   view.track_geometry_animation = view.toplevel && canvas_interaction && !zoom_frame;
+  view.camera_motion = s->observer->camera_frame && canvas_window;
   absolute_position(s, &view.x, &view.y);
     if (auto* xdg_root = root(s)->xdg_surface;
         xdg_root != nullptr && xdg_root->toplevel != nullptr) {
@@ -1785,6 +1823,11 @@ void surface_commit(zwayland::server::Client*, zwayland::server::Resource* r) {
   }
   if ((x != nullptr && x->toplevel != nullptr && (was_mapped != x->mapped || constraints_changed)) ||
       s->layer_surface != nullptr) configure_layout(s->observer);
+  if (x != nullptr && x->toplevel != nullptr && !was_mapped && x->mapped && !x->ever_mapped) {
+    x->ever_mapped = true;
+    if (x->transient_parent == nullptr && s->parent == nullptr && !portal_surface(s))
+      recenter_canvas_on_surface(s->observer, s);
+  }
   if (s->observer != nullptr && s->observer->seat != nullptr) {
     auto* seat = s->observer->seat;
     for (auto* constraint : seat->constraints) if (constraint->surface == s) {
@@ -2107,22 +2150,37 @@ void begin_interactive(XdgSurfaceState* x, zwayland::server::Client* client, std
 }
 void end_interactive(SeatState* seat) {
   if (seat == nullptr) return;
-  const bool restore_cursor = seat->canvas_panning;
+  const bool group_dragging = seat->canvas_cluster_dragging;
+  const bool restore_cursor = seat->canvas_panning || group_dragging;
   auto* observer = seat->display.observer;
   auto* pan_output = restore_cursor ? output_state(observer, seat->interactive_output) : nullptr;
-  const bool pan_handled = pan_output != nullptr && observer->camera_output == pan_output->info.id &&
-      observer->camera_tag == pan_output->active_tag;
-  if (restore_cursor && pan_output == nullptr) observer->camera.stop();
+  const bool pan_handled = pan_output != nullptr &&
+      (group_dragging || (observer->camera_output == pan_output->info.id &&
+                          observer->camera_tag == pan_output->active_tag));
+  bool pan_changed = false;
+  if (seat->canvas_panning && pan_handled) {
+    const Rect work = output_work(observer, pan_output->info.id);
+    pan_changed = observer->camera.finish_pan(
+        pan_output->canvas_viewports[pan_output->active_tag - 1], work.width, work.height);
+  }
+  if (restore_cursor && !pan_handled) observer->camera.stop();
   seat->interactive = nullptr;
   seat->resize_edge = protocol::XDG_TOPLEVEL_RESIZE_EDGE_NONE;
   seat->compositor_interactive = false;
   seat->tiled_resize = false;
   seat->canvas_panning = false;
+  seat->canvas_cluster_dragging = false;
+  seat->cluster_armed = false;
+  seat->cluster_members.clear();
+  seat->cluster_output = {};
+  seat->cluster_tag = 0;
   seat->interactive_button = 0;
   seat->interactive_output = {};
   seat->weight_before = seat->weight_after = 0;
   if (pan_handled) {
     configure_canvas_frame(observer, pan_output->info.id);
+    if (pan_changed && observer->event_callback != nullptr)
+      observer->event_callback(observer->event_data, "camera");
   } else {
     configure_layout(observer);
   }
@@ -2245,6 +2303,8 @@ bool valid_positioner(const PositionerState& p) {
 }
 void send_pointer_frame(SeatState* seat, zwayland::server::Client* client) { for (auto* resource : seat->pointers) if (resource->client == client && resource->version >= 5) protocol::wl_pointer_send_frame(*resource); }
 void set_keyboard_focus(SeatState* seat, SurfaceState* next) {
+  if (seat != nullptr && seat->canvas_cluster_dragging && next != nullptr &&
+      root(next) != root(seat->interactive)) return;
   if (seat != nullptr && seat->compositor_interactive && root(seat->interactive) != root(next)) end_interactive(seat);
   if (next != nullptr && root(next)->xdg_surface != nullptr && root(next)->xdg_surface->toplevel != nullptr && seat != nullptr && seat->keyboard_focus != nullptr) {
     const auto* current = root(seat->keyboard_focus);
@@ -3040,6 +3100,82 @@ bool CompositorServer::dispatch_action(const std::string& action, const std::str
       if (xdg != nullptr) notify_toplevel_tags(&impl_->observer, xdg);
       if (impl_->observer.event_callback != nullptr) impl_->observer.event_callback(impl_->observer.event_data, "tag");
     }
+  } else if (action == "movecluster") {
+    if (!argument.empty()) return fail("movecluster does not take an argument");
+    if (!endless_canvas(&impl_->observer) || seat.session_lock != nullptr)
+      return fail("movecluster requires an unlocked endless canvas");
+    if (seat.cluster_armed) {
+      if (seat.canvas_cluster_dragging) end_interactive(&seat);
+      seat.cluster_armed = false;
+      seat.cluster_members.clear();
+      return true;
+    }
+    if (seat.compositor_interactive || seat.drag_origin != nullptr)
+      return fail("another pointer interaction is active");
+    auto* selected = root(seat.toplevel_focus);
+    if (selected == nullptr) return fail("no focused canvas window");
+    OutputId output_id;
+    std::uint8_t tag = 0;
+    if (auto* role = selected->xdg_surface; role != nullptr && role->toplevel != nullptr &&
+        role->mapped && !role->fullscreen && role->canvas_bounds.initialized) {
+      output_id = role->output;
+      tag = role->tag;
+    }
+#ifdef ZWWM_XWAYLAND
+    else if (auto* role = selected->xwayland_surface; role != nullptr && role->window != nullptr &&
+             role->window->mapped && !role->fullscreen && role->canvas_bounds.initialized) {
+      output_id = role->output;
+      tag = role->tag;
+    }
+#endif
+    if (!output_id) return fail("focused window has no canvas bounds");
+    auto* owner = output_state(&impl_->observer, output_id);
+    if (owner == nullptr || owner->active_tag != tag) return fail("focused window is not on the active tag");
+    struct Candidate { SurfaceState* surface; CanvasBounds bounds; };
+    std::vector<Candidate> candidates;
+    for (auto* surface : impl_->surfaces) {
+      if (surface == nullptr || surface->parent != nullptr) continue;
+      if (auto* role = surface->xdg_surface; role != nullptr && role->toplevel != nullptr &&
+          role->output == output_id && role->tag == tag && !role->fullscreen &&
+          role->canvas_bounds.initialized && visible_xdg(&impl_->observer, role)) {
+        candidates.push_back({surface, role->canvas_bounds});
+        continue;
+      }
+#ifdef ZWWM_XWAYLAND
+      if (auto* role = surface->xwayland_surface; role != nullptr && role->window != nullptr &&
+          role->window->mapped && role->output == output_id && role->tag == tag &&
+          !role->fullscreen && role->canvas_bounds.initialized)
+        candidates.push_back({surface, role->canvas_bounds});
+#endif
+    }
+    const auto first = std::find_if(candidates.begin(), candidates.end(),
+        [selected](const Candidate& candidate) { return candidate.surface == selected; });
+    if (first == candidates.end()) return fail("focused window is not a visible canvas window");
+    const auto& viewport = owner->canvas_viewports[tag - 1];
+    const auto distance = static_cast<std::int64_t>(std::llround(
+        impl_->config->layout.inner_gap + 20.0 / viewport.scale));
+    std::vector<bool> included(candidates.size(), false);
+    std::vector<std::size_t> queue;
+    const auto start = static_cast<std::size_t>(std::distance(candidates.begin(), first));
+    included[start] = true;
+    queue.push_back(start);
+    const auto nearby = [distance](const CanvasBounds& a, const CanvasBounds& b) {
+      const auto gap_x = std::max<std::int64_t>({0, b.x - (a.x + a.width), a.x - (b.x + b.width)});
+      const auto gap_y = std::max<std::int64_t>({0, b.y - (a.y + a.height), a.y - (b.y + b.height)});
+      return gap_x <= distance && gap_y <= distance;
+    };
+    for (std::size_t at = 0; at < queue.size(); ++at)
+      for (std::size_t index = 0; index < candidates.size(); ++index) {
+        if (included[index] || !nearby(candidates[queue[at]].bounds, candidates[index].bounds)) continue;
+        included[index] = true;
+        queue.push_back(index);
+      }
+    seat.cluster_members.clear();
+    for (const auto index : queue)
+      seat.cluster_members.push_back({candidates[index].surface->id, candidates[index].bounds});
+    seat.cluster_output = output_id;
+    seat.cluster_tag = tag;
+    seat.cluster_armed = true;
   } else if (action == "focus") {
     std::vector<SurfaceState*> visible;
     for (auto* surface : impl_->surfaces) {
@@ -3087,7 +3223,8 @@ bool CompositorServer::dispatch_action(const std::string& action, const std::str
       };
       if (focused == nullptr || std::find(visible.begin(), visible.end(), focused) == visible.end()) {
         set_keyboard_focus(&seat, visible.front());
-        configure_layout(&impl_->observer);
+        if (!recenter_canvas_on_surface(&impl_->observer, visible.front()))
+          configure_layout(&impl_->observer);
         return true;
       }
       const auto origin = center_of(focused);
@@ -3107,7 +3244,8 @@ bool CompositorServer::dispatch_action(const std::string& action, const std::str
           {origin.first, origin.second}, centers, direction);
       if (!nearest) return fail("no visible window in that direction");
       set_keyboard_focus(&seat, directional[*nearest]);
-      configure_layout(&impl_->observer);
+      if (!recenter_canvas_on_surface(&impl_->observer, directional[*nearest]))
+        configure_layout(&impl_->observer);
       return true;
     }
     auto current = std::find(visible.begin(), visible.end(), focused);
@@ -3462,7 +3600,8 @@ bool CompositorServer::pointer_pan_motion(double dx, double dy) {
     observer.camera_tag = output->active_tag;
   }
   auto& viewport = output->canvas_viewports[output->active_tag - 1];
-  if (observer.camera.pan_by(viewport, dx, dy)) {
+  const Rect work = output_work(&observer, output->info.id);
+  if (observer.camera.pan_by(viewport, work.width, work.height, dx, dy, timestamp_ms())) {
     configure_canvas_frame(&observer, output->info.id);
     if (observer.event_callback != nullptr) observer.event_callback(observer.event_data, "camera");
   }
@@ -3483,6 +3622,41 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
     impl_->observer.active_output = impl_->active_output;
     if (impl_->active_output != previous_output) notify_active_tags(&impl_->observer);
   }
+  if (impl_->seat_state.canvas_cluster_dragging) {
+    auto& seat = impl_->seat_state;
+    auto* output = output_state(&impl_->observer, seat.cluster_output);
+    if (output == nullptr || output->active_tag != seat.cluster_tag) {
+      end_interactive(&seat);
+    } else {
+      const auto& viewport = output->canvas_viewports[seat.cluster_tag - 1];
+      const auto world_x = static_cast<std::int64_t>(std::llround(
+          (static_cast<double>(x) - seat.interactive_pointer_x) / viewport.scale));
+      const auto world_y = static_cast<std::int64_t>(std::llround(
+          (static_cast<double>(y) - seat.interactive_pointer_y) / viewport.scale));
+      for (const auto& member : seat.cluster_members) {
+        const auto found = std::find_if(impl_->surfaces.begin(), impl_->surfaces.end(),
+            [&](const SurfaceState* surface) { return surface->id == member.id; });
+        if (found == impl_->surfaces.end()) continue;
+        if (auto* role = (*found)->xdg_surface; role != nullptr && role->toplevel != nullptr &&
+            role->output == seat.cluster_output && role->tag == seat.cluster_tag) {
+          role->canvas_bounds.x = member.start.x + world_x;
+          role->canvas_bounds.y = member.start.y + world_y;
+        }
+#ifdef ZWWM_XWAYLAND
+        else if (auto* role = (*found)->xwayland_surface; role != nullptr && role->window != nullptr &&
+                 role->output == seat.cluster_output && role->tag == seat.cluster_tag) {
+          role->canvas_bounds.x = member.start.x + world_x;
+          role->canvas_bounds.y = member.start.y + world_y;
+        }
+#endif
+      }
+      configure_canvas_frame(&impl_->observer, output->info.id);
+      seat.pointer_x = x;
+      seat.pointer_y = y;
+      sync_pointer_position(&seat);
+      return;
+    }
+  }
   if (impl_->seat_state.canvas_panning) {
     auto* output = output_state(&impl_->observer, impl_->seat_state.interactive_output);
     if (output == nullptr) end_interactive(&impl_->seat_state);
@@ -3496,7 +3670,8 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
       auto& viewport = output->canvas_viewports[output->active_tag - 1];
       const double dx = static_cast<double>(x) - impl_->seat_state.pointer_x;
       const double dy = static_cast<double>(y) - impl_->seat_state.pointer_y;
-      if (observer.camera.pan_by(viewport, dx, dy)) {
+      const Rect work = output_work(&observer, output->info.id);
+      if (observer.camera.pan_by(viewport, work.width, work.height, dx, dy, timestamp_ms())) {
         configure_canvas_frame(&observer, output->info.id);
         if (observer.event_callback != nullptr) observer.event_callback(observer.event_data, "camera");
       }
@@ -3699,6 +3874,42 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
   }
   SurfaceState* target = seat.pointer_grab != nullptr ? seat.pointer_grab : seat.pointer_focus;
   auto* target_root = root(target);
+  if (state == protocol::WL_POINTER_BUTTON_STATE_PRESSED && button == BTN_LEFT &&
+      seat.cluster_armed && seat.session_lock == nullptr) {
+    auto* output = output_state(&impl_->observer, seat.cluster_output);
+    if (output != nullptr && output->active_tag == seat.cluster_tag && !seat.cluster_members.empty()) {
+      auto* selected = root(seat.toplevel_focus);
+      if (selected != nullptr && selected->id == seat.cluster_members.front().id) {
+        for (auto& member : seat.cluster_members) {
+          const auto found = std::find_if(impl_->surfaces.begin(), impl_->surfaces.end(),
+              [&](const SurfaceState* surface) { return surface->id == member.id; });
+          if (found == impl_->surfaces.end()) continue;
+          if (auto* role = (*found)->xdg_surface; role != nullptr && role->toplevel != nullptr)
+            member.start = role->canvas_bounds;
+#ifdef ZWWM_XWAYLAND
+          else if (auto* role = (*found)->xwayland_surface; role != nullptr && role->window != nullptr)
+            member.start = role->canvas_bounds;
+#endif
+        }
+        impl_->observer.camera.stop();
+        seat.canvas_cluster_dragging = true;
+        seat.compositor_interactive = true;
+        seat.interactive = selected;
+        seat.interactive_button = button;
+        seat.interactive_output = output->info.id;
+        seat.interactive_pointer_x = seat.pointer_x;
+        seat.interactive_pointer_y = seat.pointer_y;
+        seat.cursor_override_shape = "grabbing";
+        apply_cursor_shape(&seat);
+        seat.pressed_buttons.push_back(button);
+        seat.pointer_grab = nullptr;
+        set_pointer_focus(&seat, nullptr, 0, 0);
+        return;
+      }
+    }
+    seat.cluster_armed = false;
+    seat.cluster_members.clear();
+  }
   if (state == protocol::WL_POINTER_BUTTON_STATE_PRESSED && seat.session_lock == nullptr && target_root != nullptr) {
     const auto* xdg = target_root->xdg_surface;
 #ifdef ZWWM_XWAYLAND
@@ -4042,6 +4253,8 @@ void CompositorServer::keyboard_key(std::uint32_t time, std::uint32_t key, std::
         if (binding.action == KeyAction::movetotag && xdg != nullptr) notify_toplevel_tags(&impl_->observer, xdg);
       } else if (binding.action == KeyAction::focus) {
         (void)dispatch_action("focus", binding.argument, nullptr);
+      } else if (binding.action == KeyAction::movecluster) {
+        (void)dispatch_action("movecluster", binding.argument, nullptr);
       }
       send_modifiers(seat);
       return;

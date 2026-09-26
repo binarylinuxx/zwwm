@@ -10,11 +10,10 @@ and kernel credentials. Child loss, socket loss, or client destruction revokes
 capture authority. The private connection uses `libzwayland-client` and typed
 generated protocol bindings rather than libwayland.
 
-After acquiring its backend D-Bus name, the helper checks the public portal's
-ScreenCast source mask. If the frontend started too early and cached stale or
-zero capabilities, the helper asynchronously restarts only
-`xdg-desktop-portal.service`. A frontend already advertising the expected
-monitor and window mask is left untouched.
+After acquiring its backend D-Bus name, the helper asynchronously restarts
+`xdg-desktop-portal.service` once. Another backend can advertise the same
+ScreenCast source mask, so checking that mask cannot confirm that the frontend
+selected zwwm. The restart picks up this session's desktop and portal paths.
 
 ## Screenshot
 

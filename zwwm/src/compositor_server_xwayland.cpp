@@ -326,11 +326,15 @@ void XwaylandRuntime::process_event(xcb_generic_event_t* generic) {
           item->override_redirect = event->override_redirect != 0;
           read_window_properties(item);
           (void)reclassify(item);
+          const bool first_map = !item->ever_mapped;
           item->mapped = true;
+          item->ever_mapped = true;
           apply_geometry(item);
           if (item->surface != nullptr && item->surface->surface != nullptr) {
             configure_layout(item->surface->surface->observer, nullptr);
             publish_state(item->surface);
+            if (first_map && !item->override_redirect && item->transient_for == XCB_WINDOW_NONE && !item->modal)
+              recenter_canvas_on_surface(item->surface->surface->observer, item->surface->surface);
             if (!item->override_redirect) focus_xwayland_if_needed(item->surface->surface);
           }
           publish_clients();
