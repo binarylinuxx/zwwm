@@ -49,11 +49,18 @@ void initialize_canvas_bounds(CanvasBounds& bounds, CanvasRect previous,
                               std::uint32_t border_width) {
   if (bounds.initialized) return;
   if (previous.width > 0 && previous.height > 0) {
+    const auto border = static_cast<std::int32_t>(std::min<std::uint32_t>(
+        border_width, static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max() / 2)));
+    const auto desired = [border](std::int32_t content, std::int32_t fallback) {
+      return content > 0 ? content + std::min(border * 2,
+          std::numeric_limits<std::int32_t>::max() - content) : fallback;
+    };
     bounds = {.x = static_cast<std::int64_t>(std::llround(
-                  viewport.x + (previous.x - work.x) / viewport.scale)),
-              .y = static_cast<std::int64_t>(std::llround(
-                  viewport.y + (previous.y - work.y) / viewport.scale)),
-              .width = previous.width, .height = previous.height, .initialized = true};
+                   viewport.x + (previous.x - work.x) / viewport.scale)),
+               .y = static_cast<std::int64_t>(std::llround(
+                   viewport.y + (previous.y - work.y) / viewport.scale)),
+               .width = desired(content_width, previous.width),
+               .height = desired(content_height, previous.height), .initialized = true};
     return;
   }
   const auto border = static_cast<std::int32_t>(std::min<std::uint32_t>(

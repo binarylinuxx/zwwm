@@ -770,8 +770,8 @@ void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
       auto* viewport = canvas_viewport(observer, x->output, x->tag);
       if (viewport == nullptr) continue;
       layout::initialize_canvas_bounds(x->canvas_bounds, x->fullscreen ? Rect{} : x->tile_bounds, work, *viewport,
-                               x->window_geometry_set ? x->window_geometry.width : 0,
-                               x->window_geometry_set ? x->window_geometry.height : 0, border);
+                                x->window_geometry_set ? x->window_geometry.width : x->accepted_width,
+                                x->window_geometry_set ? x->window_geometry.height : x->accepted_height, border);
       Rect bounds;
       std::uint32_t states = kSuppressClientDecorations |
           (observer->seat != nullptr && observer->seat->toplevel_focus == surface ? kActivatedState : 0U);
@@ -1639,6 +1639,7 @@ void surface_commit(zwayland::server::Client*, zwayland::server::Resource* r) {
   s->pending_frame_callbacks.clear();
   const bool was_mapped = x != nullptr && x->mapped;
   bool constraints_changed = false;
+  bool canvas_size_changed = false;
   if (x != nullptr && x->toplevel != nullptr) {
     constraints_changed = x->min_width != x->pending_min_width || x->min_height != x->pending_min_height ||
                           x->max_width != x->pending_max_width || x->max_height != x->pending_max_height;
@@ -1775,6 +1776,22 @@ void surface_commit(zwayland::server::Client*, zwayland::server::Resource* r) {
       const Rect geometry = effective_window_geometry(s);
       x->accepted_width = geometry.width;
       x->accepted_height = geometry.height;
+      if (x->toplevel != nullptr && x->mapped && !x->fullscreen &&
+          x->canvas_bounds.initialized && endless_canvas(s->observer) &&
+          (s->observer->seat == nullptr || root(s->observer->seat->interactive) != s) &&
+          (x->size_configure_serial == 0 ||
+           (x->size_configure_acked && x->commit_count > x->size_ack_commit_count))) {
+        const auto border = static_cast<std::int64_t>(s->observer->config->border_width());
+        const auto width = static_cast<std::int32_t>(std::clamp<std::int64_t>(
+            static_cast<std::int64_t>(geometry.width) + 2 * border, 1,
+            std::numeric_limits<std::int32_t>::max()));
+        const auto height = static_cast<std::int32_t>(std::clamp<std::int64_t>(
+            static_cast<std::int64_t>(geometry.height) + 2 * border, 1,
+            std::numeric_limits<std::int32_t>::max()));
+        canvas_size_changed = x->canvas_bounds.width != width || x->canvas_bounds.height != height;
+        x->canvas_bounds.width = width;
+        x->canvas_bounds.height = height;
+      }
     }
     const bool toplevel_unmapped = x->toplevel != nullptr && s->current_buffer == nullptr;
     if (toplevel_unmapped && s->observer != nullptr && s->observer->seat != nullptr &&
@@ -1821,7 +1838,8 @@ void surface_commit(zwayland::server::Client*, zwayland::server::Resource* r) {
       if (seat->regular_focus == s) seat->regular_focus = nullptr;
     }
   }
-  if ((x != nullptr && x->toplevel != nullptr && (was_mapped != x->mapped || constraints_changed)) ||
+  if ((x != nullptr && x->toplevel != nullptr &&
+       (was_mapped != x->mapped || constraints_changed || canvas_size_changed)) ||
       s->layer_surface != nullptr) configure_layout(s->observer);
   if (x != nullptr && x->toplevel != nullptr && !was_mapped && x->mapped && !x->ever_mapped) {
     x->ever_mapped = true;
