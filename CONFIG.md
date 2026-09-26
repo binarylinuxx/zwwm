@@ -385,8 +385,8 @@ A new native toplevel first receives an unconstrained `0x0` configure. Its first
 committed `set_window_geometry` size, or its committed buffer size when no window
 geometry was supplied, becomes its canvas size. Half the work area is only a
 fallback before the client supplies either size. Later client-requested sizes
-update the canvas after the corresponding configure is acknowledged. New windows are centered in the
-current viewport. Each output and tag retains its own pan position. Fullscreen
+update the canvas after the corresponding configure is acknowledged. New windows
+are centered in the current viewport. Each output and tag retains its own pan position. Fullscreen
 temporarily bypasses the canvas transform and never changes that saved pan or
 the window's world geometry, so leaving fullscreen restores the window against
 the same viewport position.
