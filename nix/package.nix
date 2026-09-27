@@ -40,6 +40,7 @@ stdenv.mkDerivation {
       ../.version
       ../README.md
       ../CONFIG.md
+      ../PLUGINS.md
       ../CHANGELOG.md
       ../CONTRIBUTING.md
       ../LICENSE
