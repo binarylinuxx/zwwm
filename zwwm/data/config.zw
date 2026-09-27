@@ -152,6 +152,13 @@ output = {
   transform = "normal"
 }
 
+-- Optional overrides by connector name (see `zwwmctl outputs`). Use the short
+-- name for all graphics cards, or card0-DP-1 to select a specific card.
+-- outputs = {
+--   "DP-1" = { mode = "2560x1440@144" scale-per-mille = 1250 }
+--   "card0-HDMI-A-1" = { mode = "preferred" transform = "90" }
+-- }
+
 -- Environment inherited by programs launched from zwwm.
 environment = {
   XDG_CURRENT_DESKTOP = "zwwm"

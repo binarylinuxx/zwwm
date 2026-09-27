@@ -10,6 +10,7 @@
 
 #include "zwwm/output.hpp"
 #include "zwwm/error_popup.hpp"
+#include "zwwm/plugin.hpp"
 
 struct libinput;
 struct libseat;
@@ -24,6 +25,7 @@ struct OutputCapture;
 
 class RuntimeBackend {
  public:
+  using GestureObserver = void (*)(void*, const ZwwmPluginGesture&);
   RuntimeBackend(zwayland::server::EventLoop* event_loop, std::shared_ptr<const RuntimeConfig> config);
   ~RuntimeBackend();
   RuntimeBackend(const RuntimeBackend&) = delete;
@@ -36,6 +38,7 @@ class RuntimeBackend {
   void set_config(std::shared_ptr<const RuntimeConfig> config);
   [[nodiscard]] bool rebuild_switch_shaders(std::string* error);
   void set_input_target(CompositorServer* compositor);
+  void set_gesture_observer(GestureObserver observer, void* data);
   void set_dmabuf_target(CompositorServer* compositor);
   void set_cursor_shape(const char* xcursor_name);
   [[nodiscard]] bool set_cursor_theme(const std::string& theme, std::uint32_t size,
@@ -101,6 +104,8 @@ class RuntimeBackend {
   bool right_alt_pressed_ = false;
   std::uint32_t consumed_vt_key_ = 0;
   CompositorServer* input_target_ = nullptr;
+  GestureObserver gesture_observer_ = nullptr;
+  void* gesture_data_ = nullptr;
   std::shared_ptr<const RuntimeConfig> config_;
   CompositorServer* dmabuf_target_ = nullptr;
   double cursor_x_ = 480.0;

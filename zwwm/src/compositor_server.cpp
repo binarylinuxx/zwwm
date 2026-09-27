@@ -2670,7 +2670,7 @@ void bind_decoration_manager(zwayland::server::Client* client, void*, std::uint3
 }
 }  // namespace detail
 using namespace detail;
-struct CompositorServer::Impl { std::uint32_t compositor = 0, shm = 0, wm = 0, dialog_manager = 0, decoration_manager = 0, cursor_shape_manager = 0, pointer_constraints = 0, relative_pointer_manager = 0, seat = 0, sub = 0, dmabuf = 0, data_device_manager = 0, data_control_manager = 0, wlr_data_control_manager = 0, session_lock_manager = 0, tags_manager = 0; std::shared_ptr<const RuntimeConfig> config; Observer observer; TagsState tags; std::vector<SurfaceState*> surfaces; SeatState seat_state; DmabufState dmabuf_state; std::vector<std::unique_ptr<OutputState>> outputs; std::vector<std::unique_ptr<OutputState>> retired_outputs; OutputId active_output; ~Impl() { const auto release = [this](auto& list) { for (auto& state : list) { if (state->global != 0) seat_state.display.display->destroy_global(state->global); for (auto* resource : state->resources) resource->userdata.reset(); } }; release(outputs); release(retired_outputs); } };
+struct CompositorServer::Impl { std::uint32_t compositor = 0, shm = 0, wm = 0, dialog_manager = 0, decoration_manager = 0, cursor_shape_manager = 0, pointer_constraints = 0, relative_pointer_manager = 0, seat = 0, sub = 0, dmabuf = 0, data_device_manager = 0, data_control_manager = 0, wlr_data_control_manager = 0, session_lock_manager = 0, tags_manager = 0; std::shared_ptr<const RuntimeConfig> config; Observer observer; TagsState tags; std::vector<SurfaceState*> surfaces; SeatState seat_state; DmabufState dmabuf_state; std::vector<std::unique_ptr<OutputState>> outputs; std::vector<std::unique_ptr<OutputState>> retired_outputs; OutputId active_output; ExternalActionHandler external_action = nullptr; void* external_action_data = nullptr; ~Impl() { const auto release = [this](auto& list) { for (auto& state : list) { if (state->global != 0) seat_state.display.display->destroy_global(state->global); for (auto* resource : state->resources) resource->userdata.reset(); } }; release(outputs); release(retired_outputs); } };
  CompositorServer::CompositorServer(zwayland::server::Display* d, std::shared_ptr<const RuntimeConfig> config) : impl_(new Impl) { impl_->config = std::move(config); if (impl_->config == nullptr) { delete impl_; impl_ = nullptr; throw std::invalid_argument("runtime configuration is required"); } impl_->observer.surfaces = &impl_->surfaces;
   impl_->observer.seat = &impl_->seat_state;
   impl_->observer.config = impl_->config.get();
@@ -2696,6 +2696,7 @@ void CompositorServer::set_pointer_position_observer(PointerPositionObserver o, 
 void CompositorServer::set_toplevel_observer(ToplevelObserver o, void* d) { impl_->observer.toplevel_callback = o; impl_->observer.toplevel_data = d; }
 void CompositorServer::set_presentation_observer(PresentationObserver o, void* d) { impl_->observer.presentation_callback = o; impl_->observer.presentation_data = d; }
 void CompositorServer::set_event_observer(EventObserver o, void* d) { impl_->observer.event_callback = o; impl_->observer.event_data = d; }
+void CompositorServer::set_external_action_handler(ExternalActionHandler handler, void* data) { impl_->external_action = handler; impl_->external_action_data = data; }
 void CompositorServer::set_portal_client(zwayland::server::Client* client) {
   impl_->observer.portal_pid = -1;
   if (client != nullptr) impl_->observer.portal_pid = client->pid();
@@ -3288,6 +3289,8 @@ bool CompositorServer::dispatch_action(const std::string& action, const std::str
     set_keyboard_focus(&seat, *current);
     configure_layout(&impl_->observer);
   } else {
+    if (impl_->external_action != nullptr)
+      return impl_->external_action(impl_->external_action_data, action, argument, error);
     return fail("unknown action");
   }
   return true;

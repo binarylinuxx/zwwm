@@ -186,6 +186,8 @@ class RuntimeConfig {
   AnimationConfig animations;
   std::vector<std::pair<std::string, std::string>> environment;
   std::vector<std::string> startup_commands;
+  std::vector<std::string> plugins;
+  std::vector<std::pair<std::string, std::string>> plugin_settings;
   std::vector<Keybinding> keybindings;
   std::vector<WindowRule> window_rules;
   std::vector<LayerRule> layer_rules;
@@ -224,7 +226,7 @@ struct LoadedRuntimeConfig {
 
 class ConfigReloader {
  public:
-  using Apply = void (*)(void*, std::shared_ptr<const RuntimeConfig>);
+  using Apply = bool (*)(void*, std::shared_ptr<const RuntimeConfig>);
   using Error = void (*)(void*, const std::string&);
 
   ConfigReloader(::zwayland::server::EventLoop* event_loop, std::string path,

@@ -444,7 +444,11 @@ keyboard = {
 
 ## Output
 
-The current output configuration is global rather than connector-specific.
+`output` provides defaults for every monitor. Use `outputs = {}` to override
+individual monitors by connector name. Find the names with `zwwmctl outputs`:
+the direct DRM backend publishes names such as `card0-DP-1` and
+`card0-HDMI-A-1`. A short name such as `DP-1` matches that connector on any
+card; a full name selects a particular card. Nested mode uses `nested-1`.
 
 ```zw
 output = {
@@ -453,7 +457,19 @@ output = {
   bit-depth = 8
   transform = "normal"
 }
+
+outputs = {
+  "DP-1" = { mode = "2560x1440@144" scale-per-mille = 1250 }
+  "card0-HDMI-A-1" = { mode = "preferred" transform = "90" }
+}
 ```
+
+Each named entry inherits unspecified fields from `output`. Explicit full-name
+entries take precedence over short-name entries. Monitors are arranged
+horizontally in connector-name order; `outputs` changes their settings, not
+their placement. Scale and transform apply on live reload; mode and bit-depth
+changes require restarting zwwm. The DRM scanout bit depth is shared by outputs
+on the same graphics card.
 
 | Field | Default | Range or values |
 |---|---:|---|
@@ -502,6 +518,11 @@ zwwmctl setcursor "Bibata-Modern-Classic" 24
 This runtime override is not written back to `config.zw`.
 
 ## Autostart
+
+Native C++ plugins can be loaded with `plugins = ["/absolute/path/plugin.so"]`.
+Each plugin may define live-reloadable options under `plugin-settings = {
+pluginname = { option = value } }`. See [PLUGINS.md](PLUGINS.md) for the API and
+build instructions.
 
 `exec-sh-on-startup` runs commands once after zwwm initializes its backend,
 Wayland socket, and Xwayland integration, then presents its first frame. It does
@@ -637,7 +658,7 @@ after changing the requested DRM mode or bit depth.
 ## Current Caveats
 
 - Configuration compatibility is not guaranteed yet.
-- Output settings are global and do not currently match individual connectors.
+- Monitor placement is automatic and does not currently support explicit positions.
 - Unknown settings produce diagnostics; misspelled fields should not be relied
   upon being ignored.
 

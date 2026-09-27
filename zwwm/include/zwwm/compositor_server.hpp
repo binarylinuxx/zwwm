@@ -151,6 +151,8 @@ class CompositorServer {
   using ToplevelObserver = void (*)(void*);
   using PresentationObserver = void (*)(void*);
   using EventObserver = void (*)(void*, const char* event);
+  using ExternalActionHandler = bool (*)(void*, const std::string& action,
+                                        const std::string& argument, std::string* error);
 
   CompositorServer(zwayland::server::Display* display, std::shared_ptr<const RuntimeConfig> config);
   CompositorServer(zwayland::server::Display* display, std::shared_ptr<const RuntimeConfig> config,
@@ -167,6 +169,7 @@ class CompositorServer {
   void set_presentation_observer(PresentationObserver observer, void* data);
   // Coarse external state events, independent of portal observers.
   void set_event_observer(EventObserver observer, void* data);
+  void set_external_action_handler(ExternalActionHandler handler, void* data);
   // Keep authenticated portal dialogs above requesting applications.
   void set_portal_client(zwayland::server::Client* client);
   void set_config(std::shared_ptr<const RuntimeConfig> config);

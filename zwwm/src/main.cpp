@@ -4,6 +4,7 @@
 #include "zwwm/runtime_backend.hpp"
 #include "zwwm/runtime_config.hpp"
 #include "zwwm/portal_capture.hpp"
+#include "plugin_loader.hpp"
 
 #include <zwayland/server/display.hpp>
 
@@ -125,6 +126,7 @@ int main(int argc, char** argv) {
     zwwm::CompositorServer* compositor;
     zwwm::NestedBackend* nested;
     zwwm::RuntimeBackend* runtime = nullptr;
+    zwwm::PluginLoader* plugins = nullptr;
     void show_error(const std::string& message) {
       if (runtime != nullptr) runtime->show_error(message);
       else nested->show_error(message);
@@ -159,12 +161,18 @@ int main(int argc, char** argv) {
     config_reloader = std::make_unique<zwwm::ConfigReloader>(event_loop, loaded.path, loaded.config,
         [](void* data, std::shared_ptr<const zwwm::RuntimeConfig> config) {
           auto* targets = static_cast<ConfigTargets*>(data);
+          std::string error;
+          if (targets->plugins != nullptr && !targets->plugins->configure(config->plugin_settings, &error)) {
+            targets->show_error(error);
+            return false;
+          }
           if (!apply_environment(*config)) {
             targets->show_error("Could not apply the configuration environment");
-            return;
+            return false;
           }
           const auto shader_error = targets->apply_config(std::move(config));
           if (shader_error.empty()) targets->clear_error();
+          return true;
         }, &config_targets,
         [](void* data, const std::string& message) {
           static_cast<ConfigTargets*>(data)->show_error(message);
@@ -181,6 +189,12 @@ int main(int argc, char** argv) {
             auto error = zwwm::format_runtime_config_error(loaded.path, next.diagnostics);
             config_targets.show_error(error);
             return error;
+          }
+          std::string plugin_error;
+          if (config_targets.plugins != nullptr &&
+              !config_targets.plugins->configure(next.config->plugin_settings, &plugin_error)) {
+            config_targets.show_error(plugin_error);
+            return plugin_error;
           }
           if (!apply_environment(*next.config)) {
             const std::string error = "Could not apply the configuration environment";
@@ -200,6 +214,22 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "zwwm: manager protocol initialization failed: %s\n", exception.what());
     return EXIT_FAILURE;
   }
+  zwwm::PluginLoader plugins(&compositor_server);
+  struct EventTargets {
+    std::unique_ptr<zwwm::ManagerProtocol>* manager;
+    zwwm::PluginLoader* plugins;
+  } event_targets{&manager_protocol, &plugins};
+  compositor_server.set_event_observer([](void* data, const char* event) {
+    auto* targets = static_cast<EventTargets*>(data);
+    if (event == nullptr) return;
+    if (*targets->manager != nullptr) (*targets->manager)->emit(event);
+    targets->plugins->emit(event);
+  }, &event_targets);
+  plugins.load(loaded.config->plugins, loaded.path);
+  config_targets.plugins = &plugins;
+  std::string plugin_error;
+  if (!plugins.configure(loaded.config->plugin_settings, &plugin_error))
+    std::fprintf(stderr, "zwwm: %s\n", plugin_error.c_str());
   nested_backend.set_input_target(&compositor_server);
   nested_backend.set_dmabuf_target(&compositor_server);
   const char* parent_wayland_display = std::getenv("WAYLAND_DISPLAY");
@@ -266,6 +296,9 @@ int main(int argc, char** argv) {
     zwwm::RuntimeBackend drm_backend(event_loop, loaded.config);
     config_targets.runtime = &drm_backend;
     drm_backend.set_input_target(&compositor_server);
+    drm_backend.set_gesture_observer([](void* data, const ZwwmPluginGesture& gesture) {
+      static_cast<zwwm::PluginLoader*>(data)->gesture(gesture);
+    }, &plugins);
     if (!drm_backend.start()) {
       std::fprintf(stderr, "zwwm: backend initialization failed: %s\n", drm_backend.last_error().c_str());
       manager_protocol.reset();

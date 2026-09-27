@@ -367,6 +367,7 @@ zwwm = executable(
   'zwwm',
   [
     'zwwm/src/main.cpp',
+    'zwwm/src/plugin_loader.cpp',
     'zwwm/src/error_popup.cpp',
     'zwwm/src/manager_protocol.cpp',
     'zwwm/src/nested_backend.cpp',
@@ -388,6 +389,7 @@ zwwm = executable(
     dependency('xcursor'),
     dependency('fontconfig'),
     dependency('freetype2'),
+    cpp_compiler.find_library('dl'),
     zwwm_compositor_dep,
     zw_lang_dep,
     zwwm_runtime_config_dep,
@@ -444,6 +446,7 @@ install_data(
   install_dir: get_option('datadir') / 'zwwm/shaders',
 )
 install_data('zwwm/data/zwwm.desktop', install_dir: get_option('datadir') / 'wayland-sessions')
+install_headers('zwwm/include/zwwm/plugin.hpp', subdir: 'zwwm')
 install_data('zwwm-protocols/protocols/zwwm-layer-shell-v1.xml',
   'zwwm-protocols/protocols/xwlr-layer-shell-v1.xml',
   install_dir: get_option('datadir') / 'zwwm/protocols')

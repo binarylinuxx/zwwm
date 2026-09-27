@@ -476,6 +476,10 @@ int RuntimeBackend::on_error_timeout(void* data) {
   return 0;
 }
 void RuntimeBackend::set_input_target(CompositorServer* compositor) { input_target_ = compositor; }
+void RuntimeBackend::set_gesture_observer(GestureObserver observer, void* data) {
+  gesture_observer_ = observer;
+  gesture_data_ = data;
+}
 void RuntimeBackend::set_dmabuf_target(CompositorServer* compositor) {
   dmabuf_target_ = compositor;
   publish_dmabuf_importer();
@@ -1217,6 +1221,64 @@ void RuntimeBackend::dispatch_libinput() {
           const auto value120 = discrete * 120;
           input_target_->pointer_axis(libinput_event_pointer_get_time(pointer), wl_axis, value, wayland_source, discrete, value120, value == 0.0);
         }
+      } else if (gesture_observer_ != nullptr &&
+                 (type == LIBINPUT_EVENT_GESTURE_SWIPE_BEGIN ||
+                  type == LIBINPUT_EVENT_GESTURE_SWIPE_UPDATE ||
+                  type == LIBINPUT_EVENT_GESTURE_SWIPE_END ||
+                  type == LIBINPUT_EVENT_GESTURE_PINCH_BEGIN ||
+                  type == LIBINPUT_EVENT_GESTURE_PINCH_UPDATE ||
+                  type == LIBINPUT_EVENT_GESTURE_PINCH_END ||
+                  type == LIBINPUT_EVENT_GESTURE_HOLD_BEGIN ||
+                  type == LIBINPUT_EVENT_GESTURE_HOLD_END)) {
+        auto* gesture = libinput_event_get_gesture_event(event);
+        ZwwmPluginGesture input{};
+        input.kind = type == LIBINPUT_EVENT_GESTURE_SWIPE_BEGIN ||
+                     type == LIBINPUT_EVENT_GESTURE_SWIPE_UPDATE ||
+                     type == LIBINPUT_EVENT_GESTURE_SWIPE_END ? ZwwmGestureKind::swipe :
+                     type == LIBINPUT_EVENT_GESTURE_PINCH_BEGIN ||
+                     type == LIBINPUT_EVENT_GESTURE_PINCH_UPDATE ||
+                     type == LIBINPUT_EVENT_GESTURE_PINCH_END ? ZwwmGestureKind::pinch :
+                     ZwwmGestureKind::hold;
+        input.phase = type == LIBINPUT_EVENT_GESTURE_SWIPE_BEGIN ||
+                      type == LIBINPUT_EVENT_GESTURE_PINCH_BEGIN ||
+                      type == LIBINPUT_EVENT_GESTURE_HOLD_BEGIN ? ZwwmGesturePhase::begin :
+                      type == LIBINPUT_EVENT_GESTURE_SWIPE_END ||
+                      type == LIBINPUT_EVENT_GESTURE_PINCH_END ||
+                      type == LIBINPUT_EVENT_GESTURE_HOLD_END ? ZwwmGesturePhase::end :
+                      ZwwmGesturePhase::update;
+        input.fingers = libinput_event_gesture_get_finger_count(gesture);
+        input.time_usec = libinput_event_gesture_get_time_usec(gesture);
+        input.scale = 1.0;
+        input.output = "";
+        input.device = libinput_device_get_sysname(libinput_event_get_device(event));
+        const OutputConfig* output_config = &config_->output;
+        for (const auto& device : devices_) for (const auto& output : device->outputs) {
+          const auto& info = output->output;
+          if (cursor_x_ >= info.logical_x && cursor_y_ >= info.logical_y &&
+              cursor_x_ < info.logical_x + info.logical_width &&
+              cursor_y_ < info.logical_y + info.logical_height) {
+            input.output = info.connector.c_str();
+            output_config = &config_->output_for(info.connector);
+          }
+        }
+        if (input.phase == ZwwmGesturePhase::update) {
+          input.dx = libinput_event_gesture_get_dx(gesture) * 1000.0 / output_config->scale_per_mille;
+          input.dy = libinput_event_gesture_get_dy(gesture) * 1000.0 / output_config->scale_per_mille;
+          if (output_config->transform == OutputTransform::rotate_90) {
+            const double x = input.dy; input.dy = -input.dx; input.dx = x;
+          } else if (output_config->transform == OutputTransform::rotate_180) {
+            input.dx = -input.dx; input.dy = -input.dy;
+          } else if (output_config->transform == OutputTransform::rotate_270) {
+            const double x = -input.dy; input.dy = input.dx; input.dx = x;
+          }
+          if (input.kind == ZwwmGestureKind::pinch) {
+            input.scale = libinput_event_gesture_get_scale(gesture);
+            input.angle_delta = libinput_event_gesture_get_angle_delta(gesture);
+          }
+        }
+        if (input.phase == ZwwmGesturePhase::end)
+          input.cancelled = libinput_event_gesture_get_cancelled(gesture) != 0;
+        gesture_observer_(gesture_data_, input);
       } else if (type == LIBINPUT_EVENT_KEYBOARD_KEY) {
         auto* keyboard = libinput_event_get_keyboard_event(event);
         const auto key = libinput_event_keyboard_get_key(keyboard);

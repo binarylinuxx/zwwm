@@ -253,7 +253,13 @@ class Parser {
         error("unterminated object");
         return std::nullopt;
       }
-      const auto key = parse_identifier();
+      std::optional<std::string> key;
+      if (peek() == '"') {
+        auto quoted = parse_string();
+        if (quoted.has_value()) key = *std::get_if<std::string>(&quoted->data);
+      } else {
+        key = parse_identifier();
+      }
       if (!key.has_value()) {
         return std::nullopt;
       }
@@ -565,6 +571,28 @@ ValidationResult validate_config(const Config& config, std::span<const Validatio
       }
       continue;
     }
+    if (assignment.key == "plugins") {
+      const auto* paths = std::get_if<Value::Array>(&assignment.value.data);
+      if (paths == nullptr) {
+        validation_error(result.diagnostics, assignment.location, "plugins must be an array");
+      } else for (const auto& path : paths->values) {
+        if (!std::holds_alternative<std::string>(path.data) &&
+            !std::holds_alternative<VariableReference>(path.data))
+          validation_error(result.diagnostics, assignment.location, "plugin paths must be strings or variable references");
+      }
+      continue;
+    }
+    if (assignment.key == "plugin-settings") {
+      const auto* settings = std::get_if<Value::Object>(&assignment.value.data);
+      if (settings == nullptr) {
+        validation_error(result.diagnostics, assignment.location, "plugin-settings must be an object");
+      } else for (std::size_t index = 0; index < settings->names.size(); ++index) {
+        if (settings->names[index].empty() || !is_object(settings->values[index]))
+          validation_error(result.diagnostics, assignment.location,
+                           "plugin-settings entries must have a nonempty name and an object value");
+      }
+      continue;
+    }
     if (assignment.key == "bind") {
       const auto* list = std::get_if<Value::List>(&assignment.value.data);
       if (list == nullptr || list->values.size() != 4) {
@@ -761,6 +789,10 @@ ValidationResult validate_config(const Config& config, std::span<const Validatio
         continue;
       }
       for (std::size_t index = 0; index < object->names.size(); ++index) {
+        if (object->names[index].empty()) {
+          validation_error(result.diagnostics, assignment.location, "outputs connector names must not be empty");
+          continue;
+        }
         const auto* configured = std::get_if<Value::Object>(&object->values[index].data);
         if (configured == nullptr) {
           validation_error(result.diagnostics, assignment.location,

@@ -60,13 +60,59 @@ const lang::Assignment* assignment(const lang::Config& config, std::string_view 
 }
 
 const std::string* resolved_string(const lang::Value& value,
-                                   const std::unordered_map<std::string, std::string>& variables) {
+                                    const std::unordered_map<std::string, std::string>& variables) {
   if (const auto* text = lang::as_string(value); text != nullptr) return text;
   if (const auto* reference = std::get_if<lang::VariableReference>(&value.data); reference != nullptr) {
     const auto item = variables.find(reference->name);
     return item == variables.end() ? nullptr : &item->second;
   }
   return nullptr;
+}
+
+std::string json_quote(std::string_view text) {
+  std::string result = "\"";
+  constexpr char hex[] = "0123456789abcdef";
+  for (const unsigned char character : text) {
+    if (character == '"' || character == '\\') { result += '\\'; result += static_cast<char>(character); }
+    else if (character < 0x20) {
+      result += "\\u00";
+      result += hex[character >> 4U];
+      result += hex[character & 15U];
+    } else result += static_cast<char>(character);
+  }
+  return result + '"';
+}
+
+std::optional<std::string> plugin_json(
+    const lang::Value& value, const std::unordered_map<std::string, std::string>& variables) {
+  if (std::holds_alternative<std::monostate>(value.data)) return "null";
+  if (const auto* boolean = lang::as_boolean(value)) return *boolean ? "true" : "false";
+  if (const auto* integer = lang::as_integer(value)) return std::to_string(*integer);
+  if (const auto* text = resolved_string(value, variables)) return json_quote(*text);
+  const auto* array = lang::as_array(value);
+  const auto* list = lang::as_list(value);
+  if (array != nullptr || list != nullptr) {
+    const auto& values = array != nullptr ? array->values : list->values;
+    std::string json = "[";
+    for (const auto& entry : values) {
+      const auto encoded = plugin_json(entry, variables);
+      if (!encoded) return std::nullopt;
+      if (json.size() > 1) json += ',';
+      json += *encoded;
+    }
+    return json + ']';
+  }
+  if (const auto* object = lang::as_object(value)) {
+    std::string json = "{";
+    for (std::size_t index = 0; index < object->names.size(); ++index) {
+      const auto encoded = plugin_json(object->values[index], variables);
+      if (!encoded) return std::nullopt;
+      if (json.size() > 1) json += ',';
+      json += json_quote(object->names[index]) + ':' + *encoded;
+    }
+    return json + '}';
+  }
+  return std::nullopt;
 }
 
 void error(std::vector<lang::Diagnostic>& diagnostics, lang::SourceLocation location,
@@ -439,6 +485,37 @@ RuntimeConfigResult compile_runtime_config(const lang::Config& parsed) {
                 "exec-sh-on-startup entries must resolve to nonempty strings");
         else
           mutable_config->startup_commands.push_back(*command);
+      }
+    }
+  }
+
+  if (const auto* item = assignment(parsed, "plugins"); item != nullptr) {
+    const auto* paths = lang::as_array(item->value);
+    if (paths == nullptr) {
+      error(result.diagnostics, item->location, "plugins must be an array");
+    } else {
+      for (const auto& value : paths->values) {
+        const auto* path = resolved_string(value, variables);
+        if (path == nullptr || path->empty())
+          error(result.diagnostics, item->location, "plugin paths must resolve to nonempty strings");
+        else
+          mutable_config->plugins.push_back(*path);
+      }
+    }
+  }
+
+  if (const auto* item = assignment(parsed, "plugin-settings"); item != nullptr) {
+    const auto* settings = lang::as_object(item->value);
+    if (settings == nullptr) {
+      error(result.diagnostics, item->location, "plugin-settings must be an object");
+    } else {
+      for (std::size_t index = 0; index < settings->names.size(); ++index) {
+        const auto json = plugin_json(settings->values[index], variables);
+        if (settings->names[index].empty() || lang::as_object(settings->values[index]) == nullptr || !json)
+          error(result.diagnostics, item->location,
+                "plugin-settings entries must have a nonempty name and an object value with resolvable values");
+        else
+          mutable_config->plugin_settings.emplace_back(settings->names[index], *json);
       }
     }
   }
@@ -848,6 +925,10 @@ RuntimeConfigResult compile_runtime_config(const lang::Config& parsed) {
       mutable_config->outputs.clear();
       for (std::size_t index = 0; index < object->names.size(); ++index) {
         const auto& connector = object->names[index];
+        if (connector.empty()) {
+          error(result.diagnostics, item->location, "outputs connector names must not be empty");
+          continue;
+        }
         const auto* definition = lang::as_object(object->values[index]);
         if (definition == nullptr) {
           error(result.diagnostics, item->location,
@@ -1090,8 +1171,11 @@ void ConfigReloader::reload() {
     if (error_ != nullptr) error_(data_, format_runtime_config_error(path_, next.diagnostics));
     return;
   }
+  if (!apply_(data_, next.config)) {
+    std::fprintf(stderr, "zwwm: configuration reload rejected\n");
+    return;
+  }
   config_ = std::move(next.config);
-  apply_(data_, config_);
   std::fprintf(stderr, "zwwm: configuration reloaded\n");
 }
 
