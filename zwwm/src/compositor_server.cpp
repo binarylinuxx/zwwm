@@ -163,7 +163,6 @@ struct XdgSurfaceState {
   bool floating = false;
   bool fullscreen = false;
   bool restore_floating = false;
-  bool rule_applied = false;
   std::uint32_t background_blur_radius = 0;
   bool glass = false;
   float rule_opacity = 1.0F;
@@ -441,7 +440,7 @@ bool portal_surface(const SurfaceState* surface) {
   return surface->resource->client->pid() == surface->observer->portal_pid;
 }
 void apply_window_rules(XdgSurfaceState* x) {
-  if (x == nullptr || x->rule_applied || x->surface == nullptr || x->surface->observer == nullptr) return;
+  if (x == nullptr || x->surface == nullptr || x->surface->observer == nullptr) return;
   auto* observer = x->surface->observer;
   x->background_blur_radius = 0;
   x->glass = false;
@@ -472,7 +471,6 @@ void apply_window_rules(XdgSurfaceState* x) {
     x->floating_bounds = clamp_window({work.x + (work.width - width) / 2, work.y + (work.height - height) / 2, width, height}, work);
   }
   if (portal_surface(x->surface)) x->floating = true;
-  x->rule_applied = true;
 }
 bool has_horizontal(std::uint32_t value, bool left) { return value == (left ? protocol::XDG_POSITIONER_ANCHOR_LEFT : protocol::XDG_POSITIONER_ANCHOR_RIGHT) || value == (left ? protocol::XDG_POSITIONER_ANCHOR_TOP_LEFT : protocol::XDG_POSITIONER_ANCHOR_TOP_RIGHT) || value == (left ? protocol::XDG_POSITIONER_ANCHOR_BOTTOM_LEFT : protocol::XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT); }
 bool has_vertical(std::uint32_t value, bool top) { return value == (top ? protocol::XDG_POSITIONER_ANCHOR_TOP : protocol::XDG_POSITIONER_ANCHOR_BOTTOM) || value == (top ? protocol::XDG_POSITIONER_ANCHOR_TOP_LEFT : protocol::XDG_POSITIONER_ANCHOR_BOTTOM_LEFT) || value == (top ? protocol::XDG_POSITIONER_ANCHOR_TOP_RIGHT : protocol::XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT); }
@@ -2724,7 +2722,6 @@ void CompositorServer::set_config(std::shared_ptr<const RuntimeConfig> config) {
   if (!outputs.empty()) set_outputs(std::move(outputs));
   for (auto* surface : impl_->surfaces) {
     if (surface->xdg_surface != nullptr && surface->xdg_surface->toplevel != nullptr) {
-      surface->xdg_surface->rule_applied = false;
       surface->xdg_surface->background_blur_radius = 0;
       surface->xdg_surface->rule_opacity = 1.0F;
       apply_window_rules(surface->xdg_surface);
