@@ -101,8 +101,9 @@ bind = MODIFIERS, KEY, ACTION, ARGUMENT
 
 Modifiers are XKB modifier names joined with `+`. Omit the first value or use an
 empty string when no modifier is required. Keyboard keys use XKB keysym names.
-`scrollback` and `scrollforward` match vertical mouse-wheel movement. Quote
-values when needed.
+`scrollback` and `scrollforward` match vertical mouse-wheel movement.
+Mouse buttons use `left`, `right`, `middle`, `back`, `forward` as the key name.
+Quote values when needed.
 
 ```zw
 MOD = "Mod4"
@@ -111,10 +112,12 @@ bind = $MOD, Return, exec, "ghostty"
 bind = "Mod4+Shift", Escape, exit, ""
 bind = $MOD, scrollback, zoomin, ""
 bind = $MOD, scrollforward, zoomout, ""
-bind = $MOD, "1", tag, "1"
 bind = $MOD, Left, focus, "left"
 bind = $MOD, G, movecluster, ""
 bind = , Home, exec, "jes-cli screenpicker"
+bind = Mod4, middle, pan, ""
+bind = , right, leftclick, "echo right clicked"
+bind = , left, rightclick, "echo left clicked"
 ```
 
 | Action | Argument | Behavior |
@@ -132,6 +135,10 @@ bind = , Home, exec, "jes-cli screenpicker"
 | `movetotag` | `"1"` through `"9"` | Moves the focused window to a tag. |
 | `zoomin` | Ignored | Zooms the active endless-canvas viewport in around the pointer. |
 | `zoomout` | Ignored | Zooms the active endless-canvas viewport out around the pointer. |
+| `pan` | Ignored | Starts interactive canvas panning on the active output (endless-canvas layout). Rebind the default Super+left-drag on background. |
+| `leftclick` | Shell command | Runs `sh -c ARGUMENT` on left-button press. |
+| `rightclick` | Shell command | Runs `sh -c ARGUMENT` on right-button press. |
+| `middleclick` | Shell command | Runs `sh -c ARGUMENT` on middle-button press. |
 
 Use `""` for actions that do not need an argument.
 

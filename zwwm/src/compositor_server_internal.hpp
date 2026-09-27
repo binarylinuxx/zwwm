@@ -271,6 +271,7 @@ void remember_serial(SeatState& seat, zwayland::server::Client* client, std::uin
 bool valid_selection_serial(const SeatState& seat, zwayland::server::Client* client, std::uint32_t serial);
 void send_modifiers(SeatState& seat);
 bool binding_matches(const Keybinding& binding, const SeatState& seat, std::uint32_t key);
+bool binding_matches_button(const Keybinding& binding, std::uint32_t button);
 bool binding_modifiers_match(const Keybinding& binding, const SeatState& seat);
 bool execute_binding(const Keybinding& binding);
 void apply_cursor_shape(SeatState* seat);

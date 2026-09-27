@@ -3880,6 +3880,45 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
   auto& seat = impl_->seat_state;
   if (state != protocol::WL_POINTER_BUTTON_STATE_PRESSED && state != protocol::WL_POINTER_BUTTON_STATE_RELEASED) return;
   idle_activity(&seat);
+  if (state == protocol::WL_POINTER_BUTTON_STATE_PRESSED) {
+    for (const auto& binding : impl_->config->keybindings) {
+      if (binding.action != KeyAction::pan && binding.action != KeyAction::leftclick &&
+          binding.action != KeyAction::rightclick && binding.action != KeyAction::middleclick)
+        continue;
+      if (!binding_matches_button(binding, button)) continue;
+      if (!binding_modifiers_match(binding, seat)) continue;
+      const auto& argument = binding.argument;
+      if (binding.action == KeyAction::pan) {
+        auto* output = output_state(&impl_->observer, impl_->active_output);
+        if (output != nullptr) {
+          impl_->observer.camera.stop();
+          impl_->observer.camera_output = output->info.id;
+          impl_->observer.camera_tag = output->active_tag;
+          seat.compositor_interactive = true;
+          seat.canvas_panning = true;
+          seat.cursor_override_shape = "grabbing";
+          apply_cursor_shape(&seat);
+          seat.interactive_button = button;
+          seat.interactive_output = output->info.id;
+          seat.interactive_pointer_x = seat.pointer_x;
+          seat.interactive_pointer_y = seat.pointer_y;
+          seat.pressed_buttons.push_back(button);
+          seat.pointer_grab = nullptr;
+          set_pointer_focus(&seat, nullptr, 0, 0);
+          return;
+        }
+      } else if (binding.action == KeyAction::leftclick) {
+        if (!execute_binding(Keybinding{.modifiers = binding.modifiers, .key = binding.key,
+            .action = KeyAction::exec, .argument = argument})) return;
+      } else if (binding.action == KeyAction::rightclick) {
+        if (!execute_binding(Keybinding{.modifiers = binding.modifiers, .key = binding.key,
+            .action = KeyAction::exec, .argument = argument})) return;
+      } else if (binding.action == KeyAction::middleclick) {
+        if (!execute_binding(Keybinding{.modifiers = binding.modifiers, .key = binding.key,
+            .action = KeyAction::exec, .argument = argument})) return;
+      }
+    }
+  }
   if (state == protocol::WL_POINTER_BUTTON_STATE_RELEASED && seat.compositor_interactive &&
       button == seat.interactive_button) {
     std::erase(seat.pressed_buttons, button);

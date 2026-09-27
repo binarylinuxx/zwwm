@@ -20,8 +20,11 @@ MOD = "Mod4"
 
 -- Bindings are: modifiers, key, action, argument.
 -- Modifiers use XKB names joined with "+". Supported actions are exec, reload,
--- exit, focus, killactive, killsession, togglefloating, toggle-fullscreen, tag, and
--- movetotag.
+-- exit, focus, killactive, killsession, togglefloating, toggle-fullscreen, tag,
+-- movetotag, zoomin, zoomout, movecluster, pan, leftclick, rightclick, middleclick.
+-- Mouse buttons use: left, right, middle, back, forward as key names.
+-- Example: bind = Mod4, middle, pan, ""  (canvas pan with middle mouse)
+-- Example: bind = , right, leftclick, "notify-send 'right click'"  (custom action)
 bind = $MOD, Return, exec, $TERMINAL
 bind = $MOD, D, exec, $LAUNCHER
 bind = $MOD, Q, killactive, ""
@@ -37,6 +40,7 @@ bind = $MOD, R, reload, ""
 bind = "Mod4+Shift", Escape, exit, ""
 bind = $MOD, scrollback, zoomin, ""
 bind = $MOD, scrollforward, zoomout, ""
+bind = Mod4, middle, pan, ""
 
 bind = $MOD, "1", tag, "1"
 bind = $MOD, "2", tag, "2"

@@ -289,6 +289,10 @@ std::optional<KeyAction> key_action(std::string_view text) {
   if (text == "zoomin") return KeyAction::zoomin;
   if (text == "zoomout") return KeyAction::zoomout;
   if (text == "movecluster") return KeyAction::movecluster;
+  if (text == "pan") return KeyAction::pan;
+  if (text == "leftclick") return KeyAction::leftclick;
+  if (text == "rightclick") return KeyAction::rightclick;
+  if (text == "middleclick") return KeyAction::middleclick;
   return std::nullopt;
 }
 

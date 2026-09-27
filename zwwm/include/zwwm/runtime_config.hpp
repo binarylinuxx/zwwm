@@ -131,7 +131,8 @@ struct OutputConfig {
 
 enum class KeyAction : std::uint8_t {
   exec, reload, exit, focus, killactive, killsession, togglefloating, fullscreen, tag, movetotag,
-  zoomin, zoomout, movecluster
+  zoomin, zoomout, movecluster,
+  pan, leftclick, rightclick, middleclick
 };
 
 struct Keybinding {

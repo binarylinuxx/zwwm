@@ -15,6 +15,7 @@
 #include <string>
 #include <sys/syscall.h>
 #include <sys/wait.h>
+#include <unordered_map>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -119,6 +120,13 @@ bool binding_matches(const Keybinding& binding, const SeatState& seat, std::uint
   const auto count = xkb_keymap_key_get_syms_by_level(
       seat.xkb_keymap_handle, static_cast<xkb_keycode_t>(key + 8), 0, 0, &symbols);
   return std::find(symbols, symbols + count, expected) != symbols + count;
+}
+bool binding_matches_button(const Keybinding& binding, std::uint32_t button) {
+  static const std::unordered_map<std::string_view, std::uint32_t> button_map{
+    {"left", 272}, {"right", 273}, {"middle", 274}, {"back", 275}, {"forward", 276}, {"wheel", 272}};
+  const auto it = button_map.find(binding.key);
+  if (it == button_map.end()) return false;
+  return button == it->second;
 }
 
 bool execute_binding(const Keybinding& binding) {
