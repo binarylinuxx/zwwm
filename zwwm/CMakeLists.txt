@@ -79,7 +79,7 @@ if(XWAYLAND_ENABLE)
 endif()
 target_compile_options(zwwm_compositor PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
-add_executable(zwwm src/main.cpp src/error_popup.cpp src/manager_protocol.cpp src/nested_backend.cpp src/runtime_backend.cpp src/portal_capture.cpp)
+add_executable(zwwm src/main.cpp src/plugin_loader.cpp src/error_popup.cpp src/manager_protocol.cpp src/nested_backend.cpp src/runtime_backend.cpp src/portal_capture.cpp)
 target_include_directories(zwwm PRIVATE include)
 target_link_libraries(zwwm PRIVATE
   zwayland-server
@@ -100,6 +100,7 @@ target_link_libraries(zwwm PRIVATE
   zwwm::renderer
   zwwm::animation
   zwwm::egl
+  ${CMAKE_DL_LIBS}
 )
 target_compile_options(zwwm PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_dependencies(zwwm xdg-desktop-portal-zwwm)
@@ -109,6 +110,7 @@ target_compile_definitions(zwwm PRIVATE
 )
 
 install(TARGETS zwwm RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(FILES include/zwwm/plugin.hpp DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/zwwm")
 install(PROGRAMS "${CMAKE_SOURCE_DIR}/zwwm-session" DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(FILES data/config.zw DESTINATION "${CMAKE_INSTALL_FULL_SYSCONFDIR}/xdg/zwwm")
 install(FILES data/background.png DESTINATION "${CMAKE_INSTALL_FULL_SYSCONFDIR}/xdg/zwwm/background")
@@ -118,6 +120,7 @@ install(FILES data/config.zw DESTINATION "${CMAKE_INSTALL_DATADIR}/zwwm")
 install(FILES data/background.png DESTINATION "${CMAKE_INSTALL_DATADIR}/zwwm/background")
 install(FILES data/zwwm.desktop DESTINATION "${CMAKE_INSTALL_DATADIR}/wayland-sessions")
 install(FILES "${CMAKE_SOURCE_DIR}/README.md" "${CMAKE_SOURCE_DIR}/CONFIG.md"
+               "${CMAKE_SOURCE_DIR}/PLUGINS.md"
               "${CMAKE_SOURCE_DIR}/CHANGELOG.md" "${CMAKE_SOURCE_DIR}/LICENSE"
               "${CMAKE_SOURCE_DIR}/CONTRIBUTING.md" "${CMAKE_SOURCE_DIR}/THIRD_PARTY.md"
         DESTINATION "${CMAKE_INSTALL_DOCDIR}")
