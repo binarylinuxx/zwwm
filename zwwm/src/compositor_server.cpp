@@ -679,7 +679,14 @@ void arrange_layer_surface(LayerSurfaceState* layer, Rect area) {
   const bool resized = layer->configured_width != geometry.width || layer->configured_height != geometry.height;
   surface->x = geometry.x;
   surface->y = geometry.y;
-  if (moved || resized) notify_surface_tree(surface);
+  if (moved || resized) {
+    for (auto* child : surface->children) {
+      if (child->xdg_surface != nullptr && child->xdg_surface->popup != nullptr &&
+          child->xdg_surface->popup->layer_parent == surface)
+        send_popup_configure(child->xdg_surface->popup);
+    }
+    notify_surface_tree(surface);
+  }
   if (layer->configure_requested || resized)
     configure_layer_surface(layer, geometry);
 }
@@ -768,6 +775,8 @@ bool recenter_canvas_on_surface(Observer* observer, SurfaceState* surface) {
 }
 void configure_canvas_layout(Observer* observer, XdgSurfaceState* candidate) {
   if (observer == nullptr || observer->surfaces == nullptr) return;
+  if (observer->outputs != nullptr)
+    for (const auto& output : *observer->outputs) arrange_layers(observer, output->info.id);
   const auto border = observer->config->border_width();
   for (auto* surface : *observer->surfaces) {
     if (surface == nullptr || surface->parent != nullptr) continue;

@@ -7,7 +7,7 @@
 # migration from libwayland onto these libraries is tracked separately.
 
 set(ZWAYLAND_CORE_XML
-    "${PROJECT_SOURCE_DIR}/zwwm-protocols/protocols/upstream/wayland/wayland.xml")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../zwwm-protocols/protocols/upstream/wayland/wayland.xml")
 set(ZWAYLAND_CORE_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(ZWAYLAND_CORE_SERVER_HEADER "${ZWAYLAND_CORE_GENERATED_DIR}/wayland-zwayland-server.h")
 set(ZWAYLAND_CORE_CLIENT_HEADER "${ZWAYLAND_CORE_GENERATED_DIR}/wayland-zwayland-client.h")
