@@ -1,5 +1,24 @@
 # Native plugins
 
+## Built-in demo module
+
+The build includes `zwwm-demo-plugin.so`. Add its absolute path to your
+`config.zw` (for a Meson workspace build, it is in the build directory):
+
+```zw
+plugins = ["/absolute/path/to/build-meson/zwwm-demo-plugin.so"]
+plugin-settings = { demo = { gestures = true swipe-distance = 80 } }
+```
+
+Restart the zwwm session to load the module, then run
+`zwwmctl dispatch plugin.demo in` or `zwwmctl dispatch plugin.demo out`.
+In a direct DRM session, a three-finger swipe right zooms in and a swipe left
+zooms out. Adjust `swipe-distance` live in the config to change the threshold.
+Installed packages place the module in `lib/zwwm/plugins/` (or their configured
+library directory); use the actual absolute store path when using Nix.
+
+## Plugin API
+
 zwwm loads C++ shared libraries listed in `config.zw` at session startup:
 
 ```zw

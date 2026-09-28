@@ -110,6 +110,11 @@ target_compile_definitions(zwwm PRIVATE
 )
 
 install(TARGETS zwwm RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+add_library(zwwm-demo-plugin MODULE src/demo_plugin.cpp)
+set_target_properties(zwwm-demo-plugin PROPERTIES PREFIX "")
+target_include_directories(zwwm-demo-plugin PRIVATE include)
+target_compile_options(zwwm-demo-plugin PRIVATE -Wall -Wextra -Wpedantic -Werror)
+install(TARGETS zwwm-demo-plugin LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/zwwm/plugins")
 install(FILES include/zwwm/plugin.hpp DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/zwwm")
 install(PROGRAMS "${CMAKE_SOURCE_DIR}/zwwm-session" DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(FILES data/config.zw DESTINATION "${CMAKE_INSTALL_FULL_SYSCONFDIR}/xdg/zwwm")

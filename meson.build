@@ -402,6 +402,16 @@ zwwm = executable(
   install: true,
 )
 
+shared_module(
+  'zwwm-demo-plugin',
+  'zwwm/src/demo_plugin.cpp',
+  name_prefix: '',
+  include_directories: zwwm_inc,
+  cpp_args: strict_cpp,
+  install: true,
+  install_dir: get_option('libdir') / 'zwwm/plugins',
+)
+
 zwwmctl = executable(
   'zwwmctl',
   'zwwmctl/main.cpp',

@@ -735,6 +735,25 @@ void configure_canvas_frame(Observer* observer, OutputId output) {
         .output = output, .camera_frame = true, .camera_frame_ready = true,
         .window_shader = {}, .border_shader = {}});
 }
+bool zoom_canvas(Observer* observer, int steps) {
+  if (!endless_canvas(observer) || observer->seat == nullptr ||
+      observer->seat->session_lock != nullptr) return false;
+  auto* output = output_state(observer, observer->active_output);
+  if (output == nullptr) return false;
+  const auto tag = output->active_tag;
+  if (observer->camera_output != output->info.id || observer->camera_tag != tag) {
+    observer->camera.stop();
+    observer->camera_output = output->info.id;
+    observer->camera_tag = tag;
+  }
+  auto& viewport = output->canvas_viewports[tag - 1];
+  const Rect work = output_work(observer, output->info.id);
+  if (observer->camera.zoom_by_steps(viewport, work.width, work.height, steps, timestamp_ms()))
+    configure_canvas_frame(observer, output->info.id);
+  if (observer->event_callback != nullptr)
+    observer->event_callback(observer->event_data, "camera");
+  return true;
+}
 bool recenter_canvas_on_surface(Observer* observer, SurfaceState* surface) {
   if (!endless_canvas(observer) || surface == nullptr || surface->parent != nullptr) return false;
   const CanvasBounds* bounds = nullptr;
@@ -3070,6 +3089,10 @@ bool CompositorServer::dispatch_action(const std::string& action, const std::str
     if (!execute_binding(Keybinding{.modifiers = {}, .key = {}, .action = KeyAction::exec,
                                     .argument = argument}))
       return fail("could not launch command");
+  } else if (action == "zoomin" || action == "zoomout") {
+    if (!argument.empty()) return fail("zoom actions do not take an argument");
+    if (!zoom_canvas(&impl_->observer, action == "zoomin" ? 1 : -1))
+      return fail("zoom requires an unlocked endless canvas with an active output");
   } else if (action == "killactive") {
     if (xdg != nullptr && xdg->toplevel != nullptr) protocol::xdg_toplevel_send_close(*xdg->toplevel);
 #ifdef ZWWM_XWAYLAND
@@ -4207,24 +4230,7 @@ void CompositorServer::pointer_axis(std::uint32_t time, std::uint32_t axis, doub
     for (const auto& binding : impl_->config->keybindings) {
       if (binding.key != key || !binding_modifiers_match(binding, seat)) continue;
       if (binding.action == KeyAction::zoomin || binding.action == KeyAction::zoomout) {
-        auto* output = output_state(&impl_->observer, impl_->observer.active_output);
-        if (output == nullptr) return;
-        const auto tag = output->active_tag;
-        if (impl_->observer.camera_output != output->info.id ||
-            impl_->observer.camera_tag != tag) {
-          impl_->observer.camera.stop();
-          impl_->observer.camera_output = output->info.id;
-          impl_->observer.camera_tag = tag;
-        }
-        auto& viewport = output->canvas_viewports[tag - 1];
-        const Rect work = output_work(&impl_->observer, output->info.id);
-        if (impl_->observer.camera.zoom_by_steps(
-                viewport, work.width, work.height,
-                binding.action == KeyAction::zoomin ? 1 : -1, timestamp_ms())) {
-          configure_canvas_frame(&impl_->observer, output->info.id);
-        }
-        if (impl_->observer.event_callback != nullptr)
-          impl_->observer.event_callback(impl_->observer.event_data, "camera");
+        zoom_canvas(&impl_->observer, binding.action == KeyAction::zoomin ? 1 : -1);
         return;
       }
     }
