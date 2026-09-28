@@ -101,6 +101,23 @@ Review `zwwm/data/config.zw`, then launch from a TTY:
 
 zwwm-session adviced for proper startup.
 
+### elogind and other non-systemd sessions
+
+The direct DRM backend obtains its seat through libseat; it does not require
+systemd. For elogind, install a libseat build with its logind backend enabled
+and start zwwm from an elogind-managed graphical session or a PAM-enabled TTY
+login. `pam_elogind` must provide `XDG_RUNTIME_DIR`. To explicitly select that
+libseat backend:
+
+```sh
+LIBSEAT_BACKEND=logind zwwm-session
+```
+
+`zwwm-session` uses the existing session D-Bus bus when available, and runs
+`dbus-run-session` when no bus is present and that command is installed. This
+allows the optional desktop portal to activate on non-systemd sessions.
+`launch-zwwm.sh` likewise works without `systemctl --user`.
+
 ## Control
 
 ```sh

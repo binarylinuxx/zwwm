@@ -10,10 +10,11 @@ and kernel credentials. Child loss, socket loss, or client destruction revokes
 capture authority. The private connection uses `libzwayland-client` and typed
 generated protocol bindings rather than libwayland.
 
-After acquiring its backend D-Bus name, the helper asynchronously restarts
-`xdg-desktop-portal.service` once. Another backend can advertise the same
-ScreenCast source mask, so checking that mask cannot confirm that the frontend
-selected zwwm. The restart picks up this session's desktop and portal paths.
+After acquiring its backend D-Bus name, the helper publishes the session's
+desktop and portal paths through the standard D-Bus activation environment.
+When a systemd user manager is available, it also asynchronously restarts
+`xdg-desktop-portal.service` once so an already-running frontend picks up the
+new selection. Neither step requires systemd to start the compositor or helper.
 
 ## Screenshot
 

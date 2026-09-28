@@ -300,12 +300,18 @@ bool RuntimeBackend::start() {
   }
   seat_ = libseat_open_seat(&kSeatListener, this);
   if (seat_ == nullptr) {
-    last_error_ = "libseat could not open a compositor seat";
+    last_error_ = std::string("libseat could not open a compositor seat: ") + std::strerror(errno);
     return false;
   }
   std::fprintf(stderr, "zwwm: direct backend: libseat session opened\n");
+  const int seat_fd = libseat_get_fd(seat_);
+  if (seat_fd < 0) {
+    last_error_ = std::string("libseat could not provide a seat event fd: ") + std::strerror(errno);
+    stop();
+    return false;
+  }
   try {
-    seat_source_ = event_loop_->add_fd(libseat_get_fd(seat_), EPOLLIN, [this](int fd, int mask) {
+    seat_source_ = event_loop_->add_fd(seat_fd, EPOLLIN, [this](int fd, int mask) {
       on_seat_fd(fd, static_cast<std::uint32_t>(mask), this);
       return true;
     });
@@ -334,13 +340,15 @@ bool RuntimeBackend::start() {
     return false;
   }
 
+  const char* seat_name = libseat_seat_name(seat_);
+  if (seat_name == nullptr || *seat_name == '\0') seat_name = "seat0";
   libinput_ = libinput_udev_create_context(&kLibinputInterface, this, udev_);
-  if (libinput_ == nullptr || libinput_udev_assign_seat(libinput_, "seat0") != 0) {
-    last_error_ = "could not initialize libinput for seat0";
+  if (libinput_ == nullptr || libinput_udev_assign_seat(libinput_, seat_name) != 0) {
+    last_error_ = std::string("could not initialize libinput for ") + seat_name;
     stop();
     return false;
   }
-  std::fprintf(stderr, "zwwm: direct backend: input initialized, awaiting seat activation\n");
+  std::fprintf(stderr, "zwwm: direct backend: input initialized for %s\n", seat_name);
   try {
     libinput_source_ = event_loop_->add_fd(libinput_get_fd(libinput_), EPOLLIN, [this](int fd, int mask) {
       on_libinput_fd(fd, static_cast<std::uint32_t>(mask), this);
@@ -351,9 +359,16 @@ bool RuntimeBackend::start() {
     stop();
     return false;
   }
+  // libseat's logind/elogind backend delivers the initial enable (or disable)
+  // callback on the first dispatch, even if its fd is not readable yet.
+  if (libseat_dispatch(seat_, 0) < 0) {
+    last_error_ = std::string("initial libseat dispatch failed: ") + std::strerror(errno);
+    stop();
+    return false;
+  }
+  if (!active_)
+    std::fprintf(stderr, "zwwm: seat is inactive; waiting for the login session to become active\n");
   discover_drm_devices();
-  // libseat enables the session asynchronously. On a fresh VT this first
-  // enumeration can be empty; enable_seat will discover and modeset outputs.
   return true;
 }
 

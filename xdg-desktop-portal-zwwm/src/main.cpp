@@ -47,9 +47,10 @@ bool publishActivationEnvironment() {
   if (systemd.isValid()) {
     const QDBusReply<void> systemdReply = systemd.call(QStringLiteral("SetEnvironment"),
                                                        assignments);
-    if (!systemdReply.isValid()) return false;
-    systemd.call(QStringLiteral("ResetFailedUnit"),
-                 QStringLiteral("xdg-desktop-portal-gtk.service"));
+    if (systemdReply.isValid()) {
+      systemd.call(QStringLiteral("ResetFailedUnit"),
+                   QStringLiteral("xdg-desktop-portal-gtk.service"));
+    }
   }
   return true;
 }

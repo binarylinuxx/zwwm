@@ -60,7 +60,6 @@
               qt6.qtbase.dev
               qt6.qtwayland
               seatd
-              systemd
               xdg-desktop-portal
               xdg-desktop-portal-gtk
             ];
