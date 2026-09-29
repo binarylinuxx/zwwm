@@ -13,6 +13,7 @@ struct DemoState {
   bool gestures = true;
   double swipe_x = 0.0;
   bool swiping = false;
+  bool panning = false;
 } demo;
 
 bool parse_settings(std::string_view json, int& distance, bool& gestures) {
@@ -68,6 +69,9 @@ bool validate_config(void*, const char* json, char* error, std::size_t capacity)
 
 void configure(void* data, const char* json) {
   auto* state = static_cast<DemoState*>(data);
+  if (state->panning) state->host->dispatch_action(state->host->context, "pan-end", "");
+  state->panning = false;
+  state->swiping = false;
   parse_settings(json, state->swipe_distance, state->gestures);
   std::fprintf(stderr, "zwwm demo: gestures %s, swipe distance %d\n",
                state->gestures ? "enabled" : "disabled", state->swipe_distance);
@@ -77,15 +81,24 @@ void gesture(void* data, const ZwwmPluginGesture* input) {
   auto* state = static_cast<DemoState*>(data);
   if (!state->gestures || input->kind != ZwwmGestureKind::swipe) return;
   if (input->phase == ZwwmGesturePhase::begin) {
-    state->swiping = input->fingers == 3;
+    state->panning = input->fingers == 3;
+    state->swiping = input->fingers == 4;
     state->swipe_x = 0.0;
-  } else if (input->phase == ZwwmGesturePhase::update && state->swiping) {
-    state->swipe_x += input->dx;
+  } else if (input->phase == ZwwmGesturePhase::update) {
+    if (state->panning) {
+      char delta[96];
+      std::snprintf(delta, sizeof(delta), "%.4f %.4f", input->dx, input->dy);
+      state->host->dispatch_action(state->host->context, "pan", delta);
+    }
+    if (state->swiping) state->swipe_x += input->dx;
   } else if (input->phase == ZwwmGesturePhase::end) {
+    if (state->panning)
+      state->host->dispatch_action(state->host->context, "pan-end", "");
     if (state->swiping && !input->cancelled &&
         std::abs(state->swipe_x) >= state->swipe_distance)
       state->host->dispatch_action(state->host->context,
                                    state->swipe_x > 0.0 ? "zoomin" : "zoomout", "");
+    state->panning = false;
     state->swiping = false;
   }
 }

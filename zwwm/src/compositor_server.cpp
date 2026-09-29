@@ -39,6 +39,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <charconv>
 #include <cstring>
 #include <cmath>
 #include <cstdint>
@@ -752,6 +753,29 @@ bool zoom_canvas(Observer* observer, int steps) {
     configure_canvas_frame(observer, output->info.id);
   if (observer->event_callback != nullptr)
     observer->event_callback(observer->event_data, "camera");
+  return true;
+}
+bool pan_canvas(Observer* observer, double dx, double dy, bool finish) {
+  if (!endless_canvas(observer) || observer->seat == nullptr ||
+      observer->seat->session_lock != nullptr) return false;
+  auto* output = output_state(observer, observer->active_output);
+  if (output == nullptr) return false;
+  if (observer->camera_output != output->info.id ||
+      observer->camera_tag != output->active_tag) {
+    observer->camera.stop();
+    observer->camera_output = output->info.id;
+    observer->camera_tag = output->active_tag;
+  }
+  idle_activity(observer->seat);
+  auto& viewport = output->canvas_viewports[output->active_tag - 1];
+  const Rect work = output_work(observer, output->info.id);
+  const bool changed = finish ? observer->camera.finish_pan(viewport, work.width, work.height) :
+      observer->camera.pan_by(viewport, work.width, work.height, dx, dy, timestamp_ms());
+  if (changed) {
+    configure_canvas_frame(observer, output->info.id);
+    if (observer->event_callback != nullptr)
+      observer->event_callback(observer->event_data, "camera");
+  }
   return true;
 }
 bool recenter_canvas_on_surface(Observer* observer, SurfaceState* surface) {
@@ -3093,6 +3117,25 @@ bool CompositorServer::dispatch_action(const std::string& action, const std::str
     if (!argument.empty()) return fail("zoom actions do not take an argument");
     if (!zoom_canvas(&impl_->observer, action == "zoomin" ? 1 : -1))
       return fail("zoom requires an unlocked endless canvas with an active output");
+  } else if (action == "pan" || action == "pan-end") {
+    double dx = 0.0, dy = 0.0;
+    if (action == "pan-end") {
+      if (!argument.empty()) return fail("pan-end does not take an argument");
+    } else {
+      const char* begin = argument.data();
+      const char* end = begin + argument.size();
+      const auto horizontal = std::from_chars(begin, end, dx);
+      if (horizontal.ec != std::errc{} || horizontal.ptr == end || *horizontal.ptr != ' ')
+        return fail("pan requires horizontal and vertical deltas");
+      const char* vertical_begin = horizontal.ptr + 1;
+      const auto vertical = std::from_chars(vertical_begin, end, dy);
+      if (vertical.ec != std::errc{} || vertical.ptr != end ||
+          !std::isfinite(dx) || !std::isfinite(dy) ||
+          std::abs(dx) > 4096.0 || std::abs(dy) > 4096.0)
+        return fail("pan requires finite deltas within 4096 pixels");
+    }
+    if (!pan_canvas(&impl_->observer, dx, dy, action == "pan-end"))
+      return fail("pan requires an unlocked endless canvas with an active output");
   } else if (action == "killactive") {
     if (xdg != nullptr && xdg->toplevel != nullptr) protocol::xdg_toplevel_send_close(*xdg->toplevel);
 #ifdef ZWWM_XWAYLAND

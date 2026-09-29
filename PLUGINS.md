@@ -12,8 +12,12 @@ plugin-settings = { demo = { gestures = true swipe-distance = 80 } }
 
 Restart the zwwm session to load the module, then run
 `zwwmctl dispatch plugin.demo in` or `zwwmctl dispatch plugin.demo out`.
-In a direct DRM session, a three-finger swipe right zooms in and a swipe left
-zooms out. Adjust `swipe-distance` live in the config to change the threshold.
+In a direct DRM session, a three-finger swipe pans the canvas continuously;
+four-finger swipes right or left zoom in or out. Adjust `swipe-distance` live
+in the config to change the four-finger zoom threshold.
+Plugins can call the `pan` compositor action with space-separated logical
+pixel deltas (`"12.5 -4"`) during a gesture and `pan-end` when it finishes;
+the latter snaps the camera to its final pan target.
 Installed packages place the module in `lib/zwwm/plugins/` (or their configured
 library directory); use the actual absolute store path when using Nix.
 
