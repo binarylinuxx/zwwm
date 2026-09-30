@@ -14,7 +14,7 @@ constexpr double kPanCoastRate = 9.0;
 constexpr double kPanEpsilon = 0.05;
 constexpr double kPanMomentumSeconds = 0.18;
 constexpr double kPanVelocitySmoothing = 0.45;
-constexpr double kPanMinimumFlingSpeed = 90.0;
+constexpr double kPanFullMomentumSpeed = 90.0;
 constexpr double kPanMaximumSpeed = 3500.0;
 constexpr std::uint64_t kPanSampleTimeoutMs = 100;
 
@@ -98,11 +98,12 @@ bool Camera::finish_pan(layout::CanvasViewport& viewport, std::int32_t width,
     target_center_y_ = viewport.y + height / (2.0 * viewport.scale);
   }
   const double speed = std::hypot(pan_velocity_x_, pan_velocity_y_) * viewport.scale;
-  pan_coasting_ = recent && speed >= kPanMinimumFlingSpeed;
-  if (pan_coasting_) {
+  pan_coasting_ = animating_ || recent;
+  if (recent) {
     const double freshness = 1.0 - static_cast<double>(now_ms - last_pan_input_ms_) / kPanSampleTimeoutMs;
-    target_center_x_ += pan_velocity_x_ * kPanMomentumSeconds * freshness;
-    target_center_y_ += pan_velocity_y_ * kPanMomentumSeconds * freshness;
+    const double momentum = std::clamp(speed / kPanFullMomentumSpeed, 0.0, 1.0);
+    target_center_x_ += pan_velocity_x_ * kPanMomentumSeconds * freshness * momentum;
+    target_center_y_ += pan_velocity_y_ * kPanMomentumSeconds * freshness * momentum;
     animating_ = true;
     if (last_update_ms_ == 0) last_update_ms_ = now_ms > 16 ? now_ms - 16 : 0;
   }
