@@ -769,7 +769,7 @@ bool pan_canvas(Observer* observer, double dx, double dy, bool finish) {
   idle_activity(observer->seat);
   auto& viewport = output->canvas_viewports[output->active_tag - 1];
   const Rect work = output_work(observer, output->info.id);
-  const bool changed = finish ? observer->camera.finish_pan(viewport, work.width, work.height) :
+  const bool changed = finish ? observer->camera.finish_pan(viewport, work.width, work.height, timestamp_ms()) :
       observer->camera.pan_by(viewport, work.width, work.height, dx, dy, timestamp_ms());
   if (changed) {
     configure_canvas_frame(observer, output->info.id);
@@ -2237,7 +2237,8 @@ void end_interactive(SeatState* seat) {
   if (seat->canvas_panning && pan_handled) {
     const Rect work = output_work(observer, pan_output->info.id);
     pan_changed = observer->camera.finish_pan(
-        pan_output->canvas_viewports[pan_output->active_tag - 1], work.width, work.height);
+        pan_output->canvas_viewports[pan_output->active_tag - 1], work.width, work.height,
+        timestamp_ms());
   }
   if (restore_cursor && !pan_handled) observer->camera.stop();
   seat->interactive = nullptr;

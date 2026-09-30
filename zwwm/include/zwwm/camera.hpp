@@ -22,7 +22,7 @@ public:
   bool pan_by(layout::CanvasViewport& viewport, std::int32_t width,
               std::int32_t height, double dx, double dy, std::uint64_t now_ms);
   bool finish_pan(layout::CanvasViewport& viewport, std::int32_t width,
-                  std::int32_t height);
+                  std::int32_t height, std::uint64_t now_ms);
   bool tick(layout::CanvasViewport& viewport, std::int32_t width,
             std::int32_t height, std::uint64_t now_ms);
   void stop();
@@ -32,8 +32,11 @@ public:
 private:
   CameraConfig config_;
   double zoom_velocity_ = 0.0;
+  double pan_velocity_x_ = 0.0, pan_velocity_y_ = 0.0;
   double target_center_x_ = 0.0, target_center_y_ = 0.0;
   std::uint64_t last_update_ms_ = 0;
+  std::uint64_t last_pan_input_ms_ = 0;
+  bool pan_coasting_ = false;
   bool animating_ = false;
 };
 
