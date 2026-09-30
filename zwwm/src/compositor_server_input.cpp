@@ -421,8 +421,7 @@ void update_pointer_constraints(SeatState* seat, std::int32_t, std::int32_t) {
   if (seat == nullptr) return;
   for (auto* constraint : seat->constraints) {
     const bool focused = !constraint->defunct && constraint->pointer != nullptr &&
-                         constraint->surface != nullptr && seat->pointer_focus != nullptr &&
-                         root(seat->pointer_focus) == root(constraint->surface);
+                         constraint->surface != nullptr && seat->pointer_focus == constraint->surface;
     if (constraint->active && !focused) { deactivate_constraint(constraint, true); continue; }
     if (!focused) continue;
     std::int32_t x = 0, y = 0;
@@ -528,12 +527,10 @@ void create_constraint(zwayland::server::Client* client, zwayland::server::Resou
   else
     resource->set_handler(protocol::zwp_confined_pointer_v1_handler(ZwpConfinedPointerV1KConfinedPointerHandler{}));
   resource->set_destroy_handler([](zwayland::server::Resource& destroyed) { constraint_destroyed(&destroyed); });
-  if ((seat->pointer_focus != nullptr && root(seat->pointer_focus) == root(surface)) ||
-      seat->toplevel_focus == root(surface)) {
+  if (seat->pointer_focus == surface) {
     std::int32_t x = 0, y = 0;
     surface_local_from_global(surface, seat->pointer_x, seat->pointer_y, &x, &y);
-    if (seat->pointer_focus != surface) set_pointer_focus(seat, surface, x, y);
-    else update_pointer_constraints(seat, x, y);
+    update_pointer_constraints(seat, x, y);
   }
 }
 

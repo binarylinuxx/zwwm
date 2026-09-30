@@ -3619,7 +3619,20 @@ void route_pointer_motion(SeatState* seat, std::uint32_t time, SurfaceState* hit
   seat->hit_target = hit;
   if (auto* constraint = active_constraint(seat); constraint != nullptr) {
     if (constraint->locked) { seat->hit_target = constraint->surface; sync_pointer_position(seat); return; }
-    if (seat->hit_target != constraint->surface) { x = constraint->x; y = constraint->y; }
+    if (hit != constraint->surface) {
+      std::int32_t global_x = seat->pointer_x, global_y = seat->pointer_y;
+      if (global.has_value()) {
+        global_x = global->first;
+        global_y = global->second;
+      } else if (hit != nullptr && managed_surface(hit)) {
+        surface_global_from_local(hit, x, y, &global_x, &global_y);
+      } else if (hit != nullptr) {
+        absolute_position(hit, &global_x, &global_y);
+        global_x += x;
+        global_y += y;
+      }
+      surface_local_from_global(constraint->surface, global_x, global_y, &x, &y);
+    }
     if (!confine_to_rects(constraint_rects(constraint), constraint->x, constraint->y, &x, &y)) deactivate_constraint(constraint, true);
     else { seat->hit_target = constraint->surface; constraint->x = x; constraint->y = y; }
   }
