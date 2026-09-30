@@ -424,9 +424,9 @@ void update_pointer_constraints(SeatState* seat, std::int32_t, std::int32_t) {
                          constraint->surface != nullptr && seat->pointer_focus == constraint->surface;
     if (constraint->active && !focused) { deactivate_constraint(constraint, true); continue; }
     if (!focused) continue;
-    std::int32_t x = 0, y = 0;
-    surface_local_from_global(constraint->surface, seat->pointer_x, seat->pointer_y, &x, &y);
     if (!constraint->active) {
+      std::int32_t x = 0, y = 0;
+      surface_local_from_global(constraint->surface, seat->pointer_x, seat->pointer_y, &x, &y);
       auto rects = constraint_rects(constraint);
       if (!clamp_to_rects(rects, &x, &y)) continue;
       constraint->active = true;
@@ -439,6 +439,7 @@ void update_pointer_constraints(SeatState* seat, std::int32_t, std::int32_t) {
       }
       else protocol::zwp_confined_pointer_v1_send_confined(*constraint->resource);
     } else if (!constraint->locked) {
+      auto x = constraint->x, y = constraint->y;
       auto rects = constraint_rects(constraint);
       if (!confine_to_rects(rects, constraint->x, constraint->y, &x, &y)) { deactivate_constraint(constraint, true); continue; }
       constraint->x = x;

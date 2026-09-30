@@ -3617,6 +3617,7 @@ bool managed_surface(const SurfaceState* surface) {
 void route_pointer_motion(SeatState* seat, std::uint32_t time, SurfaceState* hit, std::int32_t x, std::int32_t y,
                           const std::optional<std::pair<std::int32_t, std::int32_t>>& global) {
   seat->hit_target = hit;
+  bool constraint_clamped = false;
   if (auto* constraint = active_constraint(seat); constraint != nullptr) {
     if (constraint->locked) { seat->hit_target = constraint->surface; sync_pointer_position(seat); return; }
     if (hit != constraint->surface) {
@@ -3633,10 +3634,16 @@ void route_pointer_motion(SeatState* seat, std::uint32_t time, SurfaceState* hit
       }
       surface_local_from_global(constraint->surface, global_x, global_y, &x, &y);
     }
+    const auto requested_x = x, requested_y = y;
     if (!confine_to_rects(constraint_rects(constraint), constraint->x, constraint->y, &x, &y)) deactivate_constraint(constraint, true);
-    else { seat->hit_target = constraint->surface; constraint->x = x; constraint->y = y; }
+    else {
+      constraint_clamped = x != requested_x || y != requested_y;
+      seat->hit_target = constraint->surface;
+      constraint->x = x;
+      constraint->y = y;
+    }
   }
-  if (global.has_value() && seat->hit_target == hit) {
+  if (global.has_value() && !constraint_clamped) {
     seat->pointer_x = global->first; seat->pointer_y = global->second;
   } else if (seat->hit_target != nullptr && managed_surface(seat->hit_target)) {
     surface_global_from_local(seat->hit_target, x, y, &seat->pointer_x, &seat->pointer_y);
@@ -3683,8 +3690,10 @@ void route_pointer_motion(SeatState* seat, std::uint32_t time, SurfaceState* hit
   auto* constraint = active_constraint(seat);
   if (next != nullptr && (constraint == nullptr || !constraint->locked)) {
     if (constraint != nullptr && !constraint->locked) {
+      const bool needs_warp = next_x != constraint->x || next_y != constraint->y;
       next_x = constraint->x; next_y = constraint->y;
-      if (managed_surface(next)) surface_global_from_local(next, next_x, next_y, &seat->pointer_x, &seat->pointer_y);
+      if (needs_warp && managed_surface(next))
+        surface_global_from_local(next, next_x, next_y, &seat->pointer_x, &seat->pointer_y);
     }
     auto* client = next->resource->client;
     for (auto* resource : seat->pointers) if (resource->client == client) protocol::wl_pointer_send_motion(*resource, time, (next_x), (next_y));
