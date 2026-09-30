@@ -9,7 +9,7 @@ namespace {
 constexpr double kZoomFriction = 12.5;
 constexpr double kVelocityStackLimit = 6.0;
 constexpr double kVelocityEpsilon = 0.02;
-constexpr double kPanDragRate = 24.0;
+constexpr double kPanDragRate = 12.0;
 constexpr double kPanCoastRate = 9.0;
 constexpr double kPanEpsilon = 0.05;
 constexpr double kPanMomentumSeconds = 0.18;
