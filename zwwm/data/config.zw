@@ -98,8 +98,11 @@ shaders = {
 animations = {
   enabled = true
   duration-ms = 320
+  open-duration-ms = 240
+  close-duration-ms = 180
+  move-duration-ms = 280
+  fade-duration-ms = 160
   tag-duration-ms = 360
-  spring = { stiffness = 200 damping = 18 mass-per-mille = 1000 }
   cubic-bezier = { x1 = 220 y1 = 0 x2 = 300 y2 = 1000 }
   open-window = true
   resize = true

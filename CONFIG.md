@@ -293,8 +293,11 @@ continues to use compositor-managed window geometry.
 animations = {
   enabled = true
   duration-ms = 320
+  open-duration-ms = 240
+  close-duration-ms = 180
+  move-duration-ms = 280
+  fade-duration-ms = 160
   tag-duration-ms = 360
-  spring = { stiffness = 200 damping = 18 mass-per-mille = 1000 }
   cubic-bezier = { x1 = 220 y1 = 0 x2 = 300 y2 = 1000 }
   open-window = true
   resize = true
@@ -313,6 +316,10 @@ animations = {
 |---|---:|---:|
 | `enabled` | `false` | Boolean |
 | `duration-ms` | `320` | `0` or greater |
+| `open-duration-ms` | `0` (inherit `duration-ms`) | `0..10000` |
+| `close-duration-ms` | `0` (inherit `duration-ms`) | `0..10000` |
+| `move-duration-ms` | `0` (inherit `duration-ms`) | `0..10000` |
+| `fade-duration-ms` | `0` (inherit the open/close duration) | `0..10000` |
 | `tag-duration-ms` | `360` | `0..10000` |
 | `open-window` | `true` | Boolean |
 | `resize` | `true` | Boolean |
@@ -325,9 +332,18 @@ animations = {
 | `tag-parallax-per-mille` | `1000` | `0..1000` |
 | `tag-fade-per-mille` | `0` | `0..1000` |
 
-`spring.stiffness` and `spring.mass-per-mille` must be positive integers.
-`spring.damping` may be zero. Cubic Bezier points are per-mille values from
-`0..1000`.
+Cubic Bézier points are per-mille values from `0..1000`. The configured curve
+is applied directly, without an additional spring curve. Legacy `spring`
+settings are accepted for config compatibility but no longer alter window or
+tag transitions.
+
+Layout geometry and window presence have independent timelines. Master-stack
+and Fibonacci reflows start from the currently displayed geometry when their
+targets change, without restarting the window's fade. Open/close scale and
+offset follow the presence timeline; opacity uses its own fade duration.
+Closing freezes the last visual state until its exit animation completes.
+A client waiting for a resize buffer retains its previous image rather than
+briefly entering a close/open animation. Camera motion changes geometry only.
 
 User-driven window moves and resizes snap immediately even when `resize` is
 enabled. Open, close, fullscreen, and tag transitions remain animated.

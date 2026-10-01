@@ -3,6 +3,7 @@
 #include "zwwm/renderer/scene.hpp"
 
 #include <cstdint>
+#include <array>
 #include <optional>
 #include <span>
 #include <unordered_map>
@@ -11,8 +12,13 @@
 namespace zwwm {
 
 struct AnimationConfig {
+  bool operator==(const AnimationConfig&) const = default;
   bool enabled = false;
   std::uint32_t duration_ms = 320;
+  std::uint32_t open_duration_ms = 0;
+  std::uint32_t close_duration_ms = 0;
+  std::uint32_t move_duration_ms = 0;
+  std::uint32_t fade_duration_ms = 0;
   std::uint32_t tag_duration_ms = 360;
   std::uint32_t spring_stiffness = 200;
   std::uint32_t spring_damping = 18;
@@ -83,14 +89,23 @@ class AnimationSystem {
   void remove(std::uint64_t id);
 
  private:
-  enum class Transition : std::uint8_t { idle, opening, resizing, tracking, closing };
+  enum class Transition : std::uint8_t { idle, resizing, tracking };
+  enum class Presence : std::uint8_t { steady, opening, closing };
   struct State {
-    renderer::Rect from;
+    std::array<double, 4> from;
     renderer::Rect target;
+    State(renderer::Rect initial, renderer::Rect goal)
+        : from{static_cast<double>(initial.origin.x), static_cast<double>(initial.origin.y),
+               static_cast<double>(initial.size.width), static_cast<double>(initial.size.height)},
+          target(goal) {}
     float from_opacity = 1.0F;
     float target_opacity = 1.0F;
     std::uint64_t started_ms = 0;
     Transition transition = Transition::idle;
+    Presence presence = Presence::steady;
+    std::uint64_t presence_started_ms = 0;
+    double from_scale = 1.0, target_scale = 1.0;
+    double from_offset = 0.0, target_offset = 0.0;
     bool present = true;
   };
 
@@ -98,6 +113,8 @@ class AnimationSystem {
   [[nodiscard]] float progress(std::uint64_t started_ms, std::uint32_t duration_ms,
                                std::uint64_t now_ms) const;
   [[nodiscard]] AnimationSample sample_state(const State& state, std::uint64_t now_ms) const;
+  [[nodiscard]] float presence_progress(const State& state, std::uint64_t now_ms, bool fade = false) const;
+  [[nodiscard]] std::uint32_t presence_duration(const State& state, bool fade = false) const;
   void prune(std::uint64_t now_ms);
 
   AnimationConfig config_;

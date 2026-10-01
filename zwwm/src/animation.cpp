@@ -43,12 +43,22 @@ renderer::Rect transformed(renderer::Rect bounds, double scale, double offset_y)
   return bounds;
 }
 
-renderer::Rect interpolate(renderer::Rect from, renderer::Rect to, double progress) {
+std::array<double, 4> coordinates(renderer::Rect rect) {
+  return {static_cast<double>(rect.origin.x), static_cast<double>(rect.origin.y),
+          static_cast<double>(rect.size.width), static_cast<double>(rect.size.height)};
+}
+
+std::array<double, 4> interpolate_values(const std::array<double, 4>& from,
+                                         renderer::Rect to, double progress) {
   const auto value = [progress](double begin, double end) { return begin + (end - begin) * progress; };
-  return {{rounded_coordinate(value(from.origin.x, to.origin.x)),
-           rounded_coordinate(value(from.origin.y, to.origin.y))},
-          {rounded_dimension(value(from.size.width, to.size.width)),
-           rounded_dimension(value(from.size.height, to.size.height))}};
+  return {value(from[0], to.origin.x), value(from[1], to.origin.y),
+          value(from[2], to.size.width), value(from[3], to.size.height)};
+}
+
+renderer::Rect interpolate(const std::array<double, 4>& from, renderer::Rect to, double progress) {
+  const auto values = interpolate_values(from, to, progress);
+  return {{rounded_coordinate(values[0]), rounded_coordinate(values[1])},
+          {rounded_dimension(values[2]), rounded_dimension(values[3])}};
 }
 
 double tracking_progress(std::uint64_t started_ms, std::uint64_t now_ms) {
@@ -76,65 +86,60 @@ double bezier_progress(double elapsed, const AnimationConfig& config) {
   return cubic(y1, y2, (low + high) * 0.5);
 }
 
-double spring_progress(double time, const AnimationConfig& config) {
-  const double mass = std::max(0.001, config.spring_mass_per_mille / 1000.0);
-  const double stiffness = std::max(1.0, static_cast<double>(config.spring_stiffness));
-  const double damping = std::max(0.0, static_cast<double>(config.spring_damping));
-  const double omega = std::sqrt(stiffness / mass);
-  const double ratio = damping / (2.0 * std::sqrt(stiffness * mass));
-  double response = 1.0;
-  if (ratio < 1.0 - 0.0001) {
-    const double root = std::sqrt(std::max(0.0, 1.0 - ratio * ratio));
-    const double damped = omega * root;
-    response = 1.0 - std::exp(-ratio * omega * time) *
-                         (std::cos(damped * time) + ratio / root * std::sin(damped * time));
-  } else if (ratio <= 1.0 + 0.0001) {
-    const double phase = omega * time;
-    response = 1.0 - (1.0 + phase) * std::exp(-phase);
-  } else {
-    const double root = std::sqrt(ratio * ratio - 1.0);
-    const double r1 = -omega * (ratio - root);
-    const double r2 = -omega * (ratio + root);
-    const double displacement = r2 / (r1 - r2) * std::exp(r1 * time) -
-                                r1 / (r1 - r2) * std::exp(r2 * time);
-    response = 1.0 + displacement;
-  }
-  return std::isfinite(response) ? std::clamp(response, -0.05, 1.08) : 1.0;
-}
-
 }  // namespace
 
 AnimationSystem::AnimationSystem(AnimationConfig config) : config_(config) {}
 
 void AnimationSystem::set_config(AnimationConfig config, std::uint64_t now_ms) {
+  if (config == config_) return;
   for (auto& [id, state] : states_) {
     (void)id;
-    const auto current = sample_state(state, now_ms);
-    state.from = current.bounds;
-    state.from_opacity = current.opacity;
+    state.from = interpolate_values(state.from, state.target, progress(state, now_ms));
+    const float presence_amount = presence_progress(state, now_ms);
+    state.from_opacity += (state.target_opacity - state.from_opacity) * presence_progress(state, now_ms, true);
+    state.from_scale += (state.target_scale - state.from_scale) * presence_amount;
+    state.from_offset += (state.target_offset - state.from_offset) * presence_amount;
     state.started_ms = now_ms;
+    state.presence_started_ms = now_ms;
   }
   config_ = config;
   if (!config_.enabled || config_.duration_ms == 0) {
     for (auto it = states_.begin(); it != states_.end();) {
       if (!it->second.present) it = states_.erase(it);
-      else { it->second.from = it->second.target; it->second.from_opacity = 1.0F; it->second.transition = Transition::idle; ++it; }
+      else {
+        auto& state = it->second;
+        state.from = coordinates(state.target);
+        state.from_opacity = state.target_opacity = 1.0F;
+        state.from_scale = state.target_scale = 1.0;
+        state.from_offset = state.target_offset = 0.0;
+        state.presence = Presence::steady;
+        state.transition = Transition::idle;
+        ++it;
+      }
     }
   }
 }
 
 void AnimationSystem::prune(std::uint64_t now_ms) {
   for (auto it = states_.begin(); it != states_.end();) {
+    auto& state = it->second;
+    if (state.presence != Presence::steady &&
+        duration_expired(state.presence_started_ms,
+                         std::max(presence_duration(state), presence_duration(state, true)), now_ms)) {
+      if (!state.present) { it = states_.erase(it); continue; }
+      state.from_opacity = state.target_opacity;
+      state.from_scale = state.target_scale;
+      state.from_offset = state.target_offset;
+      state.presence = Presence::steady;
+    }
     if (it->second.transition == Transition::tracking &&
-        same_rect(sample_state(it->second, now_ms).bounds, it->second.target)) {
-      it->second.from = it->second.target;
-      it->second.from_opacity = it->second.target_opacity;
+        same_rect(interpolate(state.from, state.target, progress(state, now_ms)), state.target)) {
+      it->second.from = coordinates(it->second.target);
       it->second.transition = Transition::idle;
-    } else if (it->second.transition != Transition::idle &&
-        duration_expired(it->second.started_ms, config_.duration_ms, now_ms)) {
-      if (!it->second.present) { it = states_.erase(it); continue; }
-      it->second.from = it->second.target;
-      it->second.from_opacity = it->second.target_opacity;
+    } else if (it->second.transition == Transition::resizing &&
+        duration_expired(it->second.started_ms,
+                         config_.move_duration_ms ? config_.move_duration_ms : config_.duration_ms, now_ms)) {
+      it->second.from = coordinates(it->second.target);
       it->second.transition = Transition::idle;
     }
     ++it;
@@ -150,54 +155,64 @@ void AnimationSystem::update(std::span<const AnimationTarget> targets, std::uint
     auto item = states_.find(target.id);
     if (item == states_.end()) {
       State state{target.bounds, target.bounds};
-       if (!target.camera_motion && target.animate_presence && config_.enabled && config_.duration_ms != 0 &&
-          config_.open_window) {
-        state.from = transformed(target.bounds, config_.open_scale_per_mille / 1000.0,
-                                 static_cast<double>(config_.open_offset_px));
+       if (target.animate_presence && config_.enabled && config_.duration_ms != 0 &&
+           config_.open_window) {
+        state.from_scale = config_.open_scale_per_mille / 1000.0;
+        state.from_offset = config_.open_offset_px;
         state.from_opacity = 0.0F;
-        state.started_ms = now_ms;
-        state.transition = Transition::opening;
+        state.presence_started_ms = now_ms;
+        state.presence = Presence::opening;
       }
       states_.emplace(target.id, state);
       continue;
     }
     State& state = item->second;
-    const auto current = sample_state(state, now_ms);
+    const auto current_bounds = interpolate_values(state.from, state.target, progress(state, now_ms));
     const bool changed = !same_rect(state.target, target.bounds);
     const bool returning = !state.present;
     state.present = true;
     state.target = target.bounds;
-    state.target_opacity = 1.0F;
+    if (returning) {
+      const float amount = presence_progress(state, now_ms);
+      state.from_opacity += (state.target_opacity - state.from_opacity) * presence_progress(state, now_ms, true);
+      state.from_scale += (state.target_scale - state.from_scale) * amount;
+      state.from_offset += (state.target_offset - state.from_offset) * amount;
+      state.target_opacity = 1.0F;
+      state.target_scale = 1.0;
+      state.target_offset = 0.0;
+      state.presence_started_ms = now_ms;
+      state.presence = Presence::opening;
+      if (!target.animate_presence || !config_.enabled || config_.duration_ms == 0) {
+        state.from_opacity = 1.0F;
+        state.from_scale = 1.0;
+        state.from_offset = 0.0;
+        state.presence = Presence::steady;
+      }
+    }
     if (target.camera_motion) {
-      state.from = target.bounds;
-      state.from_opacity = 1.0F;
+      state.from = coordinates(target.bounds);
       state.transition = Transition::idle;
       continue;
     }
     if (!target.animate && !target.track &&
         (state.transition == Transition::tracking || state.transition == Transition::resizing)) {
-      state.from = target.bounds;
-      state.from_opacity = 1.0F;
+      state.from = coordinates(target.bounds);
       state.transition = Transition::idle;
     } else if (target.track && (changed || state.transition != Transition::tracking)) {
-      state.from = current.bounds;
-      state.from_opacity = current.opacity;
+      state.from = current_bounds;
       state.started_ms = now_ms;
       state.transition = Transition::tracking;
     } else if (returning && !target.animate_presence) {
-      state.from = target.bounds;
-      state.from_opacity = 1.0F;
+      state.from = coordinates(target.bounds);
       state.transition = Transition::idle;
     } else if (config_.enabled && config_.duration_ms != 0 &&
                ((changed && config_.resize && target.animate) ||
                 (returning && target.animate_presence))) {
-      state.from = current.bounds;
-      state.from_opacity = current.opacity;
+      state.from = current_bounds;
       state.started_ms = now_ms;
-      state.transition = returning ? Transition::opening : Transition::resizing;
+      state.transition = Transition::resizing;
     } else if (changed || returning) {
-      state.from = target.bounds;
-      state.from_opacity = 1.0F;
+      state.from = coordinates(target.bounds);
       state.transition = Transition::idle;
     }
   }
@@ -208,15 +223,20 @@ void AnimationSystem::update(std::span<const AnimationTarget> targets, std::uint
       it = states_.erase(it);
       continue;
     }
-    const auto current = sample_state(state, now_ms);
+    const auto current_bounds = interpolate(state.from, state.target, progress(state, now_ms));
+    const float amount = presence_progress(state, now_ms);
     state.present = false;
-    state.from = current.bounds;
-    state.target = transformed(current.bounds, config_.close_scale_per_mille / 1000.0,
-                               -static_cast<double>(config_.close_offset_px));
-    state.from_opacity = current.opacity;
+    state.from = coordinates(current_bounds);
+    state.target = current_bounds;
+    state.transition = Transition::idle;
+    state.from_opacity += (state.target_opacity - state.from_opacity) * presence_progress(state, now_ms, true);
+    state.from_scale += (state.target_scale - state.from_scale) * amount;
+    state.from_offset += (state.target_offset - state.from_offset) * amount;
     state.target_opacity = 0.0F;
-    state.started_ms = now_ms;
-    state.transition = Transition::closing;
+    state.target_scale = config_.close_scale_per_mille / 1000.0;
+    state.target_offset = -static_cast<double>(config_.close_offset_px);
+    state.presence_started_ms = now_ms;
+    state.presence = Presence::closing;
     ++it;
   }
 }
@@ -225,7 +245,7 @@ float AnimationSystem::progress(const State& state, std::uint64_t now_ms) const 
   if (state.transition == Transition::idle || !config_.enabled || config_.duration_ms == 0) return 1.0F;
   if (state.transition == Transition::tracking)
     return static_cast<float>(tracking_progress(state.started_ms, now_ms));
-  return progress(state.started_ms, config_.duration_ms, now_ms);
+  return progress(state.started_ms, config_.move_duration_ms ? config_.move_duration_ms : config_.duration_ms, now_ms);
 }
 
 float AnimationSystem::progress(std::uint64_t started_ms, std::uint32_t duration_ms,
@@ -236,25 +256,33 @@ float AnimationSystem::progress(std::uint64_t started_ms, std::uint32_t duration
                                         static_cast<double>(duration_ms),
                                     0.0, 1.0);
   if (elapsed >= 1.0) return 1.0F;
-  const double eased = bezier_progress(elapsed, config_);
-  const double duration = duration_ms / 1000.0;
-  const double endpoint = spring_progress(duration, config_);
-  const double response = endpoint <= 0.000001 ? eased : spring_progress(eased * duration, config_) / endpoint;
-  return static_cast<float>(std::clamp(response, -0.05, 1.08));
+  return static_cast<float>(bezier_progress(elapsed, config_));
 }
 
 AnimationSample AnimationSystem::sample_state(const State& state, std::uint64_t now_ms) const {
   const float amount = progress(state, now_ms);
-  float opacity_amount = amount;
-  if ((state.transition == Transition::opening || state.transition == Transition::closing) &&
-      config_.enabled && config_.duration_ms != 0) {
-    const double elapsed = static_cast<double>(now_ms - std::min(now_ms, state.started_ms)) /
-                           config_.duration_ms;
-    opacity_amount = static_cast<float>(bezier_progress(std::clamp(elapsed, 0.0, 1.0), config_));
-  }
-  return {interpolate(state.from, state.target, amount),
+  const float presence_amount = presence_progress(state, now_ms);
+  const float opacity_amount = presence_progress(state, now_ms, true);
+  const double scale = state.from_scale + (state.target_scale - state.from_scale) * presence_amount;
+  const double offset = state.from_offset + (state.target_offset - state.from_offset) * presence_amount;
+  return {transformed(interpolate(state.from, state.target, amount), scale, offset),
           std::clamp(state.from_opacity + (state.target_opacity - state.from_opacity) * opacity_amount, 0.0F, 1.0F),
           !state.present};
+}
+
+std::uint32_t AnimationSystem::presence_duration(const State& state, bool fade) const {
+  if (fade && config_.fade_duration_ms != 0) return config_.fade_duration_ms;
+  const auto duration = state.presence == Presence::closing ? config_.close_duration_ms : config_.open_duration_ms;
+  return duration ? duration : config_.duration_ms;
+}
+
+float AnimationSystem::presence_progress(const State& state, std::uint64_t now_ms, bool fade) const {
+  if (state.presence == Presence::steady || !config_.enabled || config_.duration_ms == 0) return 1.0F;
+  const double elapsed = static_cast<double>(now_ms - std::min(now_ms, state.presence_started_ms)) /
+                          presence_duration(state, fade);
+  if (elapsed >= 1.0) return 1.0F;
+  if (elapsed <= 0.0) return 0.0F;
+  return static_cast<float>(bezier_progress(elapsed, config_));
 }
 
 std::optional<AnimationSample> AnimationSystem::sample(std::uint64_t id, std::uint64_t now_ms) const {
@@ -265,10 +293,15 @@ std::optional<AnimationSample> AnimationSystem::sample(std::uint64_t id, std::ui
 bool AnimationSystem::active(std::uint64_t now_ms) const {
   if (tag_transition(now_ms).has_value()) return true;
   return std::any_of(states_.begin(), states_.end(), [this, now_ms](const auto& item) {
+    if (item.second.presence != Presence::steady &&
+        !duration_expired(item.second.presence_started_ms,
+                          std::max(presence_duration(item.second), presence_duration(item.second, true)), now_ms)) return true;
     if (item.second.transition == Transition::tracking)
-      return !same_rect(sample_state(item.second, now_ms).bounds, item.second.target);
+      return !same_rect(interpolate(item.second.from, item.second.target, progress(item.second, now_ms)),
+                        item.second.target);
     return item.second.transition != Transition::idle &&
-           !duration_expired(item.second.started_ms, config_.duration_ms, now_ms);
+            !duration_expired(item.second.started_ms,
+                              config_.move_duration_ms ? config_.move_duration_ms : config_.duration_ms, now_ms);
   });
 }
 

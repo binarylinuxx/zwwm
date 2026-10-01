@@ -1206,6 +1206,7 @@ void notify_surface(SurfaceState* s) {
     }
   }
   view.popup = belongs_to_popup(s);
+  view.unmapped = !root_mapped;
   if (scene_root->xdg_surface != nullptr && scene_root->xdg_surface->toplevel != nullptr) {
     view.window_shader = scene_root->xdg_surface->window_shader;
     view.border_shader = scene_root->xdg_surface->border_shader;

@@ -856,7 +856,15 @@ RuntimeConfigResult compile_runtime_config(const lang::Config& parsed) {
       boolean("resize", mutable_config->animations.resize);
       boolean("close", mutable_config->animations.close);
       dimension(*object, "duration-ms", mutable_config->animations.duration_ms, item->location,
-                 result.diagnostics);
+                  result.diagnostics);
+      dimension(*object, "open-duration-ms", mutable_config->animations.open_duration_ms, item->location,
+                result.diagnostics);
+      dimension(*object, "close-duration-ms", mutable_config->animations.close_duration_ms, item->location,
+                result.diagnostics);
+      dimension(*object, "move-duration-ms", mutable_config->animations.move_duration_ms, item->location,
+                result.diagnostics);
+      dimension(*object, "fade-duration-ms", mutable_config->animations.fade_duration_ms, item->location,
+                result.diagnostics);
       const auto ranged = [&](std::string_view name, std::uint32_t& target,
                               std::int64_t minimum, std::int64_t maximum) {
         const auto* value = lang::find_field(*object, name);

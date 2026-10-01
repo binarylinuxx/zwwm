@@ -626,10 +626,11 @@ void NestedBackend::present(const ShmBufferView& buffer) {
   });
   const bool is_new = it == windows_.end();
   if (buffer.pixels == nullptr && buffer.dmabuf == nullptr) {
+    if (!is_new && it->removed) return;
     if (buffer.toplevel && buffer.assigned_content_width > 0 && buffer.assigned_content_height > 0) {
       Window window = is_new ? Window{} : *it;
       const bool retain_content = !is_new && (window.texture != 0 || !window.pixels.empty());
-      const bool closing = retain_content && !buffer.content_ready;
+      const bool closing = retain_content && buffer.unmapped;
       window.id = buffer.surface_id;
       window.root_id = buffer.root_surface_id;
       window.assigned_tile_x = buffer.assigned_tile_x; window.assigned_tile_y = buffer.assigned_tile_y;
@@ -655,7 +656,9 @@ void NestedBackend::present(const ShmBufferView& buffer) {
        window.camera_world_x = buffer.camera_world_x;
        window.camera_world_y = buffer.camera_world_y;
        window.canvas_camera = buffer.canvas_camera;
-        window.focused = buffer.focused;
+         window.focused = buffer.focused;
+         window.fullscreen = buffer.fullscreen;
+         window.compositor_opacity = buffer.compositor_opacity;
         window.window_shader = buffer.window_shader;
         window.border_shader = buffer.border_shader;
        if (!retain_content) {

@@ -73,6 +73,7 @@ struct ShmBufferView {
   bool canvas_camera = false;
   // False until the initial post-configure content commit.
   bool content_ready = true;
+  bool unmapped = false;
   // Brackets atomic publication of an output-local tag transition.
   bool tag_transition = false;
   bool tag_transition_ready = false;

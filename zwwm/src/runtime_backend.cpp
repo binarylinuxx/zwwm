@@ -841,10 +841,11 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
       return item.id == buffer.surface_id;
     });
     if (buffer.pixels == nullptr && buffer.dmabuf == nullptr) {
+      if (surface != card->shm_textures.end() && surface->removed) continue;
       if (buffer.toplevel && buffer.assigned_content_width > 0 && buffer.assigned_content_height > 0) {
         DrmOutput::ShmTexture updated = surface == card->shm_textures.end() ? DrmOutput::ShmTexture{} : std::move(*surface);
         const bool retain_content = surface != card->shm_textures.end() && updated.texture != 0;
-        const bool closing = retain_content && !buffer.content_ready;
+        const bool closing = retain_content && buffer.unmapped;
         updated.id = buffer.surface_id;
         updated.root_id = buffer.root_surface_id;
         updated.assigned_tile_x = buffer.assigned_tile_x; updated.assigned_tile_y = buffer.assigned_tile_y;
@@ -870,6 +871,8 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
         updated.toplevel = true;
         updated.popup = buffer.popup;
         updated.focused = buffer.focused;
+        updated.fullscreen = buffer.fullscreen;
+        updated.compositor_opacity = buffer.compositor_opacity;
         updated.window_shader = buffer.window_shader;
         updated.border_shader = buffer.border_shader;
         if (!retain_content) updated.content_ready = buffer.content_ready;
