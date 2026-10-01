@@ -245,8 +245,15 @@ float AnimationSystem::progress(std::uint64_t started_ms, std::uint32_t duration
 
 AnimationSample AnimationSystem::sample_state(const State& state, std::uint64_t now_ms) const {
   const float amount = progress(state, now_ms);
+  float opacity_amount = amount;
+  if ((state.transition == Transition::opening || state.transition == Transition::closing) &&
+      config_.enabled && config_.duration_ms != 0) {
+    const double elapsed = static_cast<double>(now_ms - std::min(now_ms, state.started_ms)) /
+                           config_.duration_ms;
+    opacity_amount = static_cast<float>(bezier_progress(std::clamp(elapsed, 0.0, 1.0), config_));
+  }
   return {interpolate(state.from, state.target, amount),
-          std::clamp(state.from_opacity + (state.target_opacity - state.from_opacity) * amount, 0.0F, 1.0F),
+          std::clamp(state.from_opacity + (state.target_opacity - state.from_opacity) * opacity_amount, 0.0F, 1.0F),
           !state.present};
 }
 
