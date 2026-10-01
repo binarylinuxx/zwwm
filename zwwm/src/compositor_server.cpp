@@ -164,6 +164,7 @@ struct XdgSurfaceState {
   bool floating = false;
   bool fullscreen = false;
   bool restore_floating = false;
+  bool layout_rules_applied = false;
   std::uint32_t background_blur_radius = 0;
   bool glass = false;
   float rule_opacity = 1.0F;
@@ -440,7 +441,7 @@ bool portal_surface(const SurfaceState* surface) {
       surface->observer->portal_pid <= 0) return false;
   return surface->resource->client->pid() == surface->observer->portal_pid;
 }
-void apply_window_rules(XdgSurfaceState* x) {
+void apply_window_rules(XdgSurfaceState* x, bool reapply_layout = false) {
   if (x == nullptr || x->surface == nullptr || x->surface->observer == nullptr) return;
   auto* observer = x->surface->observer;
   x->background_blur_radius = 0;
@@ -451,14 +452,16 @@ void apply_window_rules(XdgSurfaceState* x) {
   const bool fixed_size = x->min_width > 0 && x->min_height > 0 &&
       ((x->max_width > 0 && x->min_width == x->max_width) ||
        (x->max_height > 0 && x->min_height == x->max_height));
-  x->floating = x->transient_parent != nullptr || fixed_size ||
-                (x->dialog != nullptr && x->dialog->modal);
+  const bool apply_layout = !x->layout_rules_applied || reapply_layout;
+  if (!x->layout_rules_applied)
+    x->floating = x->transient_parent != nullptr || fixed_size ||
+                  (x->dialog != nullptr && x->dialog->modal);
   const WindowRule* size_rule = nullptr;
   for (const auto& rule : observer->config->window_rules) {
     if ((!rule.app_id.empty() && !glob_match(rule.app_id, x->app_id)) ||
         (!rule.title.empty() && !glob_match(rule.title, x->title))) continue;
-    if (rule.floating) x->floating = *rule.floating;
-    if (rule.width != 0 && rule.height != 0) size_rule = &rule;
+    if (apply_layout && rule.floating) x->floating = *rule.floating;
+    if (apply_layout && rule.width != 0 && rule.height != 0) size_rule = &rule;
     if (rule.opacity) x->rule_opacity = *rule.opacity;
     if (!rule.window_shader.empty()) x->window_shader = rule.window_shader;
     if (!rule.border_shader.empty()) x->border_shader = rule.border_shader;
@@ -471,7 +474,8 @@ void apply_window_rules(XdgSurfaceState* x) {
     const auto height = size_rule->height_percent ? work.height * static_cast<std::int32_t>(size_rule->height) / 100 : static_cast<std::int32_t>(size_rule->height);
     x->floating_bounds = clamp_window({work.x + (work.width - width) / 2, work.y + (work.height - height) / 2, width, height}, work);
   }
-  if (portal_surface(x->surface)) x->floating = true;
+  if (apply_layout && portal_surface(x->surface)) x->floating = true;
+  x->layout_rules_applied = true;
 }
 bool has_horizontal(std::uint32_t value, bool left) { return value == (left ? protocol::XDG_POSITIONER_ANCHOR_LEFT : protocol::XDG_POSITIONER_ANCHOR_RIGHT) || value == (left ? protocol::XDG_POSITIONER_ANCHOR_TOP_LEFT : protocol::XDG_POSITIONER_ANCHOR_TOP_RIGHT) || value == (left ? protocol::XDG_POSITIONER_ANCHOR_BOTTOM_LEFT : protocol::XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT); }
 bool has_vertical(std::uint32_t value, bool top) { return value == (top ? protocol::XDG_POSITIONER_ANCHOR_TOP : protocol::XDG_POSITIONER_ANCHOR_BOTTOM) || value == (top ? protocol::XDG_POSITIONER_ANCHOR_TOP_LEFT : protocol::XDG_POSITIONER_ANCHOR_BOTTOM_LEFT) || value == (top ? protocol::XDG_POSITIONER_ANCHOR_TOP_RIGHT : protocol::XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT); }
@@ -2768,7 +2772,7 @@ void CompositorServer::set_config(std::shared_ptr<const RuntimeConfig> config) {
     if (surface->xdg_surface != nullptr && surface->xdg_surface->toplevel != nullptr) {
       surface->xdg_surface->background_blur_radius = 0;
       surface->xdg_surface->rule_opacity = 1.0F;
-      apply_window_rules(surface->xdg_surface);
+      apply_window_rules(surface->xdg_surface, true);
       notify_surface_tree(surface);
     }
     if (surface->fractional_scale != nullptr)
