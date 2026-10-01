@@ -76,6 +76,9 @@ class RuntimeBackend {
   void suspend_drm_devices();
   void resume_drm_devices();
   void rescan_drm_device(DrmDevice& device);
+  bool initialize_atomic_output(DrmOutput& output, const std::vector<std::uint32_t>& reserved_planes);
+  bool commit_atomic_output(DrmOutput& output, std::uint32_t framebuffer, bool modeset);
+  bool disable_atomic_output(DrmOutput& output);
   void close_drm_output(DrmOutput& output);
   void close_drm_device(DrmDevice& device);
   void repaint(DrmOutput& output);

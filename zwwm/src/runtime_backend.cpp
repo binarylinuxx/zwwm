@@ -103,6 +103,35 @@ bool is_drm_card(const char* path) {
          std::all_of(name.begin() + 4, name.end(), [](char character) { return character >= '0' && character <= '9'; });
 }
 
+struct KmsProperty {
+  std::uint32_t id = 0;
+  std::uint64_t value = 0;
+  std::uint64_t minimum = 0, maximum = 0;
+};
+
+KmsProperty kms_property(int fd, std::uint32_t object, std::uint32_t type,
+                         const char* name) {
+  KmsProperty result;
+  auto* properties = drmModeObjectGetProperties(fd, object, type);
+  if (properties == nullptr) return result;
+  for (std::uint32_t index = 0; index < properties->count_props; ++index) {
+    auto* property = drmModeGetProperty(fd, properties->props[index]);
+    if (property == nullptr) continue;
+    if (std::strcmp(property->name, name) == 0) {
+      result.id = property->prop_id;
+      result.value = properties->prop_values[index];
+      if ((property->flags & DRM_MODE_PROP_RANGE) != 0 && property->count_values >= 2) {
+        result.minimum = property->values[0];
+        result.maximum = property->values[1];
+      }
+    }
+    drmModeFreeProperty(property);
+    if (result.id != 0) break;
+  }
+  drmModeFreeObjectProperties(properties);
+  return result;
+}
+
 const libseat_seat_listener kSeatListener{
     .enable_seat = RuntimeBackend::enable_seat,
     .disable_seat = RuntimeBackend::disable_seat,
@@ -235,6 +264,17 @@ struct RuntimeBackend::DrmOutput {
   OutputInfo output;
   std::uint32_t crtc_id = 0;
   std::uint32_t crtc_index = 0;
+  std::uint32_t plane_id = 0;
+  std::uint32_t mode_blob = 0;
+  struct AtomicProperties {
+    std::uint32_t connector_crtc = 0, max_bpc = 0;
+    std::uint32_t crtc_mode = 0, crtc_active = 0;
+    std::uint32_t plane_fb = 0, plane_crtc = 0;
+    std::uint32_t src_x = 0, src_y = 0, src_w = 0, src_h = 0;
+    std::uint32_t crtc_x = 0, crtc_y = 0, crtc_w = 0, crtc_h = 0;
+  } atomic;
+  std::uint64_t max_bpc_value = 0;
+  bool needs_modeset = true;
   drmModeModeInfo mode{};
   gbm_bo* front_bo = nullptr;
   gbm_bo* pending_bo = nullptr;
@@ -1338,6 +1378,7 @@ void RuntimeBackend::dispatch_drm(DrmDevice& device) {
 }
 
 void RuntimeBackend::repaint(DrmOutput& card) {
+  if (!active_ || card.retired) return;
   auto& device = *card.device;
   const auto& output_config = config_->output_for(card.output.connector);
   if (card.flip_pending) { card.needs_repaint = true; return; }
@@ -1576,29 +1617,50 @@ void RuntimeBackend::repaint(DrmOutput& card) {
   gbm_bo* bo = gbm_surface_lock_front_buffer(card.scanout_surface);
   if (bo == nullptr) { last_error_ = "could not lock direct scanout buffer"; std::fprintf(stderr, "zwwm: %s\n", last_error_.c_str()); return; }
   std::uint32_t fb = 0;
-  const auto handle = gbm_bo_get_handle(bo).u32;
-  const std::uint32_t handles[4]{handle, 0, 0, 0};
-  const std::uint32_t strides[4]{gbm_bo_get_stride(bo), 0, 0, 0};
-  const std::uint32_t offsets[4]{0, 0, 0, 0};
-  if (drmModeAddFB2(device.fd, gbm_bo_get_width(bo), gbm_bo_get_height(bo), gbm_bo_get_format(bo),
-                    handles, strides, offsets, &fb, 0) != 0 &&
-      drmModeAddFB(device.fd, gbm_bo_get_width(bo), gbm_bo_get_height(bo), 24, 32,
-                   gbm_bo_get_stride(bo), handle, &fb) != 0) {
+  std::uint32_t handles[4]{}, strides[4]{}, offsets[4]{};
+  std::uint64_t modifiers[4]{};
+  const auto modifier = gbm_bo_get_modifier(bo);
+  const int planes = gbm_bo_get_plane_count(bo);
+  if (planes < 1 || planes > 4) {
+    gbm_surface_release_buffer(card.scanout_surface, bo);
+    last_error_ = "invalid scanout buffer plane count";
+    return;
+  }
+  for (int index = 0; index < planes; ++index) {
+    handles[index] = gbm_bo_get_handle_for_plane(bo, index).u32;
+    strides[index] = gbm_bo_get_stride_for_plane(bo, index);
+    offsets[index] = gbm_bo_get_offset(bo, index);
+    modifiers[index] = modifier;
+  }
+  std::uint64_t modifier_support = 0;
+  (void)drmGetCap(device.fd, DRM_CAP_ADDFB2_MODIFIERS, &modifier_support);
+  const bool explicit_modifier = modifier != DRM_FORMAT_MOD_INVALID && modifier_support != 0;
+  int added = explicit_modifier ?
+      drmModeAddFB2WithModifiers(device.fd, gbm_bo_get_width(bo), gbm_bo_get_height(bo),
+                                gbm_bo_get_format(bo), handles, strides, offsets, modifiers,
+                                &fb, DRM_MODE_FB_MODIFIERS) :
+      drmModeAddFB2(device.fd, gbm_bo_get_width(bo), gbm_bo_get_height(bo), gbm_bo_get_format(bo),
+                    handles, strides, offsets, &fb, 0);
+  if (added != 0 && explicit_modifier && modifier == DRM_FORMAT_MOD_LINEAR)
+    added = drmModeAddFB2(device.fd, gbm_bo_get_width(bo), gbm_bo_get_height(bo), gbm_bo_get_format(bo),
+                         handles, strides, offsets, &fb, 0);
+  if (added != 0) {
     gbm_surface_release_buffer(card.scanout_surface, bo);
     last_error_ = "could not create direct scanout framebuffer: " + std::string(std::strerror(errno));
     std::fprintf(stderr, "zwwm: %s\n", last_error_.c_str());
     return;
   }
-  if (card.front_bo == nullptr) {
-    if (drmModeSetCrtc(device.fd, card.crtc_id, fb, 0, 0, &card.connector_id, 1, &card.mode) != 0) {
+  if (card.needs_modeset) {
+    if (!commit_atomic_output(card, fb, true)) {
       drmModeRmFB(device.fd, fb);
       gbm_surface_release_buffer(card.scanout_surface, bo);
-      last_error_ = "could not modeset direct output";
-      std::fprintf(stderr, "zwwm: %s: %s\n", last_error_.c_str(), std::strerror(errno));
       return;
     }
+    if (card.front_fb != 0) drmModeRmFB(device.fd, card.front_fb);
+    if (card.front_bo != nullptr) gbm_surface_release_buffer(card.scanout_surface, card.front_bo);
     card.front_bo = bo;
     card.front_fb = fb;
+    card.needs_modeset = false;
     card.needs_repaint = false;
     if (input_target_ != nullptr) input_target_->notify_frame_presented(card.output.id);
     if (continue_animation) repaint(card);
@@ -1608,13 +1670,12 @@ void RuntimeBackend::repaint(DrmOutput& card) {
   card.pending_fb = fb;
   card.flip_pending = true;
   card.needs_repaint = continue_animation;
-  if (drmModePageFlip(device.fd, card.crtc_id, fb, DRM_MODE_PAGE_FLIP_EVENT, &card) != 0) {
+  if (!commit_atomic_output(card, fb, false)) {
     card.flip_pending = false;
     drmModeRmFB(device.fd, card.pending_fb);
     gbm_surface_release_buffer(card.scanout_surface, card.pending_bo);
     card.pending_bo = nullptr;
     card.pending_fb = 0;
-    last_error_ = "could not queue direct page flip";
   }
 }
 
@@ -1675,6 +1736,12 @@ void RuntimeBackend::add_drm_device(const char* path) {
     return;
   }
   device->seat_device_id = restricted_devices_.back().second;
+  if (drmSetClientCap(device->fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0 ||
+      drmSetClientCap(device->fd, DRM_CLIENT_CAP_ATOMIC, 1) != 0) {
+    std::fprintf(stderr, "zwwm: DRM %s: atomic KMS is unavailable: %s\n", path, std::strerror(errno));
+    close_drm_device(*device);
+    return;
+  }
   device->gbm = gbm_create_device(device->fd);
   if (device->gbm == nullptr) {
     std::fprintf(stderr, "zwwm: DRM %s: gbm_create_device failed\n", path);
@@ -1742,6 +1809,142 @@ void RuntimeBackend::add_drm_device(const char* path) {
   for (auto& output : devices_.back()->outputs) repaint(*output);
 }
 
+bool RuntimeBackend::initialize_atomic_output(DrmOutput& output,
+                                             const std::vector<std::uint32_t>& reserved_planes) {
+  auto& device = *output.device;
+  auto& p = output.atomic;
+  p.connector_crtc = kms_property(device.fd, output.connector_id, DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID").id;
+  p.crtc_mode = kms_property(device.fd, output.crtc_id, DRM_MODE_OBJECT_CRTC, "MODE_ID").id;
+  p.crtc_active = kms_property(device.fd, output.crtc_id, DRM_MODE_OBJECT_CRTC, "ACTIVE").id;
+  const auto bpc = kms_property(device.fd, output.connector_id, DRM_MODE_OBJECT_CONNECTOR, "max bpc");
+  if (bpc.id != 0 && bpc.maximum >= bpc.minimum && bpc.maximum != 0) {
+    p.max_bpc = bpc.id;
+    output.max_bpc_value = std::clamp<std::uint64_t>(device.scanout_bit_depth, bpc.minimum, bpc.maximum);
+  }
+  auto* planes = drmModeGetPlaneResources(device.fd);
+  if (planes != nullptr) {
+    for (std::uint32_t index = 0; index < planes->count_planes; ++index) {
+      const auto id = planes->planes[index];
+      if (std::find(reserved_planes.begin(), reserved_planes.end(), id) != reserved_planes.end()) continue;
+      const auto busy = [id, &output](const auto& item) {
+        return item != nullptr && item->plane_id == id &&
+               (item->flip_pending || item->crtc_id != output.crtc_id);
+      };
+      if (std::any_of(device.outputs.begin(), device.outputs.end(), busy) ||
+          std::any_of(device.retired_outputs.begin(), device.retired_outputs.end(), busy)) continue;
+      auto* plane = drmModeGetPlane(device.fd, id);
+      if (plane == nullptr) continue;
+      const bool compatible = output.crtc_index < 32 &&
+          (plane->possible_crtcs & (1U << output.crtc_index)) != 0 &&
+          std::find(plane->formats, plane->formats + plane->count_formats, device.scanout_format) !=
+              plane->formats + plane->count_formats;
+      drmModeFreePlane(plane);
+      const auto type = kms_property(device.fd, id, DRM_MODE_OBJECT_PLANE, "type");
+      if (!compatible || type.id == 0 || type.value != DRM_PLANE_TYPE_PRIMARY) continue;
+      output.plane_id = id;
+      break;
+    }
+    drmModeFreePlaneResources(planes);
+  }
+  const auto plane_property = [&](const char* name) {
+    return kms_property(device.fd, output.plane_id, DRM_MODE_OBJECT_PLANE, name).id;
+  };
+  if (output.plane_id != 0) {
+    p.plane_fb = plane_property("FB_ID"); p.plane_crtc = plane_property("CRTC_ID");
+    p.src_x = plane_property("SRC_X"); p.src_y = plane_property("SRC_Y");
+    p.src_w = plane_property("SRC_W"); p.src_h = plane_property("SRC_H");
+    p.crtc_x = plane_property("CRTC_X"); p.crtc_y = plane_property("CRTC_Y");
+    p.crtc_w = plane_property("CRTC_W"); p.crtc_h = plane_property("CRTC_H");
+  }
+  if (p.connector_crtc == 0 || p.crtc_mode == 0 || p.crtc_active == 0 ||
+      p.plane_fb == 0 || p.plane_crtc == 0 || p.src_x == 0 || p.src_y == 0 ||
+      p.src_w == 0 || p.src_h == 0 || p.crtc_x == 0 || p.crtc_y == 0 ||
+      p.crtc_w == 0 || p.crtc_h == 0) {
+    std::fprintf(stderr, "zwwm: DRM %s: no compatible atomic primary plane/properties for connector %u\n",
+                 device.path.c_str(), output.connector_id);
+    return false;
+  }
+  if (drmModeCreatePropertyBlob(device.fd, &output.mode, sizeof(output.mode), &output.mode_blob) != 0) {
+    std::fprintf(stderr, "zwwm: DRM %s: could not create mode blob: %s\n",
+                 device.path.c_str(), std::strerror(errno));
+    return false;
+  }
+  return true;
+}
+
+bool RuntimeBackend::commit_atomic_output(DrmOutput& output, std::uint32_t framebuffer, bool modeset) {
+  auto& device = *output.device;
+  const auto& p = output.atomic;
+  auto* request = drmModeAtomicAlloc();
+  if (request == nullptr) return false;
+  bool valid = true;
+  const auto add = [&](std::uint32_t object, std::uint32_t property, std::uint64_t value) {
+    if (property == 0 || drmModeAtomicAddProperty(request, object, property, value) < 0) valid = false;
+  };
+  add(output.plane_id, p.plane_fb, framebuffer);
+  add(output.plane_id, p.plane_crtc, output.crtc_id);
+  if (modeset) {
+    add(output.connector_id, p.connector_crtc, output.crtc_id);
+    if (p.max_bpc != 0) add(output.connector_id, p.max_bpc, output.max_bpc_value);
+    add(output.crtc_id, p.crtc_mode, output.mode_blob);
+    add(output.crtc_id, p.crtc_active, 1);
+    add(output.plane_id, p.src_x, 0); add(output.plane_id, p.src_y, 0);
+    add(output.plane_id, p.src_w, static_cast<std::uint64_t>(output.mode.hdisplay) << 16U);
+    add(output.plane_id, p.src_h, static_cast<std::uint64_t>(output.mode.vdisplay) << 16U);
+    add(output.plane_id, p.crtc_x, 0); add(output.plane_id, p.crtc_y, 0);
+    add(output.plane_id, p.crtc_w, output.mode.hdisplay);
+    add(output.plane_id, p.crtc_h, output.mode.vdisplay);
+    const auto rotation = kms_property(device.fd, output.plane_id, DRM_MODE_OBJECT_PLANE, "rotation");
+    if (rotation.id != 0) add(output.plane_id, rotation.id, DRM_MODE_ROTATE_0);
+    // Clear cursor/overlay planes left on this CRTC by a previous seat owner.
+    // zwwm currently composes those elements into the primary framebuffer.
+    auto* planes = drmModeGetPlaneResources(device.fd);
+    if (planes != nullptr) {
+      for (std::uint32_t index = 0; index < planes->count_planes; ++index) {
+        const auto id = planes->planes[index];
+        if (id == output.plane_id) continue;
+        const auto crtc = kms_property(device.fd, id, DRM_MODE_OBJECT_PLANE, "CRTC_ID");
+        if (crtc.value != output.crtc_id) continue;
+        add(id, crtc.id, 0);
+        add(id, kms_property(device.fd, id, DRM_MODE_OBJECT_PLANE, "FB_ID").id, 0);
+      }
+      drmModeFreePlaneResources(planes);
+    }
+  }
+  const std::uint32_t flags = modeset ? DRM_MODE_ATOMIC_ALLOW_MODESET :
+      DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT;
+  bool success = valid;
+  if (success && modeset)
+    success = drmModeAtomicCommit(device.fd, request, DRM_MODE_ATOMIC_TEST_ONLY | flags, nullptr) == 0;
+  if (success) success = drmModeAtomicCommit(device.fd, request, flags, modeset ? nullptr : &output) == 0;
+  const int saved_errno = errno;
+  drmModeAtomicFree(request);
+  if (!success) {
+    last_error_ = std::string(modeset ? "atomic modeset failed: " : "atomic page flip failed: ") +
+                  std::strerror(saved_errno);
+    std::fprintf(stderr, "zwwm: %s (%s connector %u)\n", last_error_.c_str(),
+                 device.path.c_str(), output.connector_id);
+  }
+  return success;
+}
+
+bool RuntimeBackend::disable_atomic_output(DrmOutput& output) {
+  auto& device = *output.device;
+  const auto& p = output.atomic;
+  auto* request = drmModeAtomicAlloc();
+  if (request == nullptr) return false;
+  bool valid = true;
+  const auto add = [&](std::uint32_t object, std::uint32_t property) {
+    if (property == 0 || drmModeAtomicAddProperty(request, object, property, 0) < 0) valid = false;
+  };
+  add(output.plane_id, p.plane_fb); add(output.plane_id, p.plane_crtc);
+  add(output.connector_id, p.connector_crtc);
+  add(output.crtc_id, p.crtc_active); add(output.crtc_id, p.crtc_mode);
+  const bool success = valid && drmModeAtomicCommit(device.fd, request, DRM_MODE_ATOMIC_ALLOW_MODESET, nullptr) == 0;
+  drmModeAtomicFree(request);
+  return success;
+}
+
 void RuntimeBackend::rescan_drm_device(DrmDevice& device) {
   struct Candidate {
     std::string key;
@@ -1755,6 +1958,21 @@ void RuntimeBackend::rescan_drm_device(DrmDevice& device) {
   };
   drmModeRes* resources = drmModeGetResources(device.fd);
   if (resources == nullptr) return;
+  std::uint32_t primary_crtcs = 0;
+  auto* primary_planes = drmModeGetPlaneResources(device.fd);
+  if (primary_planes != nullptr) {
+    for (std::uint32_t index = 0; index < primary_planes->count_planes; ++index) {
+      const auto id = primary_planes->planes[index];
+      const auto type = kms_property(device.fd, id, DRM_MODE_OBJECT_PLANE, "type");
+      if (type.id == 0 || type.value != DRM_PLANE_TYPE_PRIMARY) continue;
+      auto* plane = drmModeGetPlane(device.fd, id);
+      if (plane == nullptr) continue;
+      if (std::find(plane->formats, plane->formats + plane->count_formats, device.scanout_format) !=
+          plane->formats + plane->count_formats) primary_crtcs |= plane->possible_crtcs;
+      drmModeFreePlane(plane);
+    }
+    drmModeFreePlaneResources(primary_planes);
+  }
   const auto device_name = device.path.substr(device.path.rfind('/') == std::string::npos ? 0 : device.path.rfind('/') + 1);
   std::vector<Candidate> candidates;
   for (int connector_index = 0; connector_index < resources->count_connectors; ++connector_index) {
@@ -1799,12 +2017,7 @@ void RuntimeBackend::rescan_drm_device(DrmDevice& device) {
       if (connector->encoder_id == encoder->encoder_id) candidate.current_crtc = encoder->crtc_id;
       drmModeFreeEncoder(encoder);
     }
-    if (configured.bit_depth == 10) for (int index = 0; index < connector->count_props; ++index) {
-      drmModePropertyRes* property = drmModeGetProperty(device.fd, connector->props[index]);
-      if (property != nullptr && std::strcmp(property->name, "max bpc") == 0 && property->count_values >= 2 && property->values[1] >= 10)
-        (void)drmModeObjectSetProperty(device.fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR, property->prop_id, 10);
-      if (property != nullptr) drmModeFreeProperty(property);
-    }
+    candidate.possible_crtcs &= primary_crtcs;
     if (candidate.possible_crtcs != 0) candidates.push_back(std::move(candidate));
     drmModeFreeConnector(connector);
   }
@@ -1861,6 +2074,7 @@ void RuntimeBackend::rescan_drm_device(DrmDevice& device) {
     (void)assign_crtc(index, visited);
   }
   std::vector<std::unique_ptr<DrmOutput>> next;
+  std::vector<std::uint32_t> reserved_planes;
   for (auto& candidate : candidates) {
     if (candidate.crtc_index == std::numeric_limits<std::uint32_t>::max()) continue;
     const auto existing = std::find_if(device.outputs.begin(), device.outputs.end(), [&](const auto& output) {
@@ -1870,6 +2084,7 @@ void RuntimeBackend::rescan_drm_device(DrmDevice& device) {
     if (existing != device.outputs.end()) {
       (*existing)->output.modes = candidate.modes;
       (*existing)->output.bit_depth = device.scanout_bit_depth;
+      reserved_planes.push_back((*existing)->plane_id);
       next.push_back(std::move(*existing));
       continue;
     }
@@ -1881,12 +2096,13 @@ void RuntimeBackend::rescan_drm_device(DrmDevice& device) {
     output->crtc_id = resources->crtcs[candidate.crtc_index];
     output->mode = candidate.mode;
     output->scanout_bit_depth = device.scanout_bit_depth;
+    if (!initialize_atomic_output(*output, reserved_planes)) continue;
     output->scanout_surface = gbm_surface_create(device.gbm, candidate.mode.hdisplay, candidate.mode.vdisplay,
         device.scanout_format, GBM_BO_USE_RENDERING | GBM_BO_USE_SCANOUT);
-    if (output->scanout_surface == nullptr) continue;
+    if (output->scanout_surface == nullptr) { close_drm_output(*output); continue; }
     output->egl_surface = eglCreateWindowSurface(device.egl_display, device.egl_config,
         reinterpret_cast<EGLNativeWindowType>(output->scanout_surface), nullptr);
-    if (output->egl_surface == EGL_NO_SURFACE) { gbm_surface_destroy(output->scanout_surface); continue; }
+    if (output->egl_surface == EGL_NO_SURFACE) { close_drm_output(*output); continue; }
     const auto& configured = config_->output_for(candidate.name);
     const auto logical = configured.logical_size({static_cast<std::uint32_t>(candidate.mode.hdisplay),
                                                    static_cast<std::uint32_t>(candidate.mode.vdisplay)});
@@ -1897,6 +2113,7 @@ void RuntimeBackend::rescan_drm_device(DrmDevice& device) {
         .refresh_millihz = mode_refresh_millihz(candidate.mode),
         .scale_per_mille = configured.scale_per_mille, .transform = configured.transform,
         .bit_depth = device.scanout_bit_depth, .modes = std::move(candidate.modes)};
+    reserved_planes.push_back(output->plane_id);
     next.push_back(std::move(output));
   }
   if (next.empty() && !device.dmabuf_textures.empty() && !device.outputs.empty() &&
@@ -1984,13 +2201,20 @@ void RuntimeBackend::resume_drm_devices() {
         device->source = -1;
       }
     }
+    for (auto& output : device->outputs) {
+      output->needs_modeset = true;
+      repaint(*output);
+    }
   }
 }
 
 void RuntimeBackend::close_drm_output(DrmOutput& output) {
   auto& device = *output.device;
-  if (device.fd >= 0 && output.crtc_id != 0)
-    (void)drmModeSetCrtc(device.fd, output.crtc_id, 0, 0, 0, nullptr, 0, nullptr);
+  if (active_ && device.fd >= 0 && (output.front_fb != 0 || output.pending_fb != 0)) {
+    if (!disable_atomic_output(output))
+      std::fprintf(stderr, "zwwm: DRM %s: could not disable atomic output %u: %s\n",
+                   device.path.c_str(), output.connector_id, std::strerror(errno));
+  }
   if (device.egl_display != EGL_NO_DISPLAY && device.egl_context != EGL_NO_CONTEXT && output.egl_surface != EGL_NO_SURFACE)
     eglMakeCurrent(device.egl_display, output.egl_surface, output.egl_surface, device.egl_context);
   if (output.pending_fb != 0) drmModeRmFB(device.fd, output.pending_fb);
@@ -2009,6 +2233,8 @@ void RuntimeBackend::close_drm_output(DrmOutput& output) {
   output.scanout_surface = nullptr;
   output.pending_bo = output.front_bo = nullptr;
   output.pending_fb = output.front_fb = 0;
+  if (output.mode_blob != 0) drmModeDestroyPropertyBlob(device.fd, output.mode_blob);
+  output.mode_blob = 0;
 }
 
 void RuntimeBackend::close_drm_device(DrmDevice& device) {

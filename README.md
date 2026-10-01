@@ -9,7 +9,7 @@ even though in 2026 everyone seems to be rewriting everything in Rust.
 
 ## Features
 
-- DRM/KMS and nested Wayland backends
+- Atomic DRM/KMS and nested Wayland backends
 - libinput and XKB keyboard support
 - Master-stack tiling, floating windows, fullscreen, and tags
 - Xwayland windows integrated into layout, focus, actions, and clipboard
@@ -92,6 +92,11 @@ sudo meson install -C build-meson
 Use a packaging `DESTDIR` instead of `/` when staging an installation.
 
 ## Run
+
+The direct backend requires atomic KMS support. It selects primary planes,
+validates modesets with test-only atomic commits, and presents frames through
+nonblocking atomic page flips. Output transforms and cursor drawing remain
+compositor-rendered in the primary framebuffer.
 
 Review `zwwm/data/config.zw`, then launch from a TTY:
 
