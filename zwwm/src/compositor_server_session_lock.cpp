@@ -14,29 +14,42 @@ namespace protocol = zwayland::generated;
 namespace zwwm::detail {
 namespace {
 
+void scene_batch(Observer* observer, bool ready) {
+  if (observer->callback != nullptr)
+    observer->callback(observer->data, ShmBufferView{
+        .output = {}, .camera_frame = true, .camera_frame_ready = ready,
+        .window_shader = {}, .border_shader = {}});
+}
+
 void blank_unlocked_scene(SessionLockState* lock) {
   end_interactive(lock == nullptr || lock->observer == nullptr ? nullptr : lock->observer->seat);
   auto* observer = lock->observer;
   auto* seat = observer->seat;
+  scene_batch(observer, false);
   for (auto* constraint : seat->constraints) deactivate_constraint(constraint, true);
   set_pointer_focus(seat, nullptr, 0, 0);
   set_keyboard_focus(seat, nullptr);
   for (auto* surface : *observer->surfaces) if (surface->parent == nullptr && surface->lock_surface == nullptr && observer->callback != nullptr) {
     observer->callback(observer->data, ShmBufferView{.surface_id = surface->id, .root_surface_id = surface->id,
-                                                       .output = surface_output(surface),
-                                                       .window_shader = {}, .border_shader = {}});
+                                                        .output = surface_output(surface),
+                                                        .scene_reset = true,
+                                                        .window_shader = {}, .border_shader = {}});
   }
+  scene_batch(observer, true);
 }
 
 void restore_unlocked_scene(SessionLockState* lock) {
   auto* observer = lock->observer;
   auto* seat = observer->seat;
+  scene_batch(observer, false);
+  observer->restoring_scene = true;
   if (seat->keyboard_focus != nullptr && seat->keyboard_focus->lock_surface != nullptr)
     set_keyboard_focus(seat, nullptr);
   for (auto* item : lock->surfaces) {
     if (item->surface != nullptr && observer->callback != nullptr)
       observer->callback(observer->data, ShmBufferView{.surface_id = item->surface->id,
           .root_surface_id = item->surface->id, .output = item->output,
+          .scene_reset = true,
           .window_shader = {}, .border_shader = {}});
     item->mapped = false;
     item->lock = nullptr;
@@ -50,6 +63,8 @@ void restore_unlocked_scene(SessionLockState* lock) {
     focus = nullptr;
   }
   if (focus != nullptr) set_keyboard_focus(seat, focus);
+  observer->restoring_scene = false;
+  scene_batch(observer, true);
 }
 
 void lock_surface_destroyed(zwayland::server::Resource* resource) {

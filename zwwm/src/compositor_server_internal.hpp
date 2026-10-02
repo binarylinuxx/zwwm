@@ -96,6 +96,7 @@ struct Observer {
   std::uint32_t refresh_millihz = 60000;
   zwwm::Camera camera;
   bool camera_frame = false;
+  bool restoring_scene = false;
   bool canvas_frame = false;
   OutputId canvas_frame_output;
   OutputId camera_output;
@@ -156,6 +157,7 @@ struct ProtocolGlobals {
   std::uint32_t viewporter = 0;
   std::uint32_t fractional_scale_manager = 0;
   std::uint32_t layer_shell = 0;
+  std::uint32_t kde_decoration_manager = 0;
   std::uint32_t layer_shell_alias = 0;
   std::uint32_t xwlr_layer_shell = 0;
   std::uint32_t relative_pointer_manager = 0;
@@ -303,6 +305,7 @@ void configure_layer_surface(LayerSurfaceState* layer, Rect area);
 void associate_layer_popup(LayerSurfaceState* layer, zwayland::server::Client* client, zwayland::server::Resource* layer_resource,
                            zwayland::server::Resource* popup_resource);
 void bind_layer_shell(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
+void bind_kde_decoration_manager(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
 void bind_xwlr_layer_shell(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
 void bind_session_lock_manager(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
 void configure_session_lock_outputs(SessionLockState* lock);

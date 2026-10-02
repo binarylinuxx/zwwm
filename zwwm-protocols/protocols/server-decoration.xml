@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="server_decoration">
+  <copyright><![CDATA[
+    SPDX-FileCopyrightText: 2015 Martin Gräßlin
+    SPDX-License-Identifier: LGPL-2.1-or-later
+  ]]></copyright>
+  <interface name="org_kde_kwin_server_decoration_manager" version="1">
+    <description summary="server-side decoration negotiation">
+      Announces server-side decoration support and the default decoration mode.
+      Use together with zxdg_decoration_manager_v1 on the same surface is undefined.
+    </description>
+    <request name="create">
+      <arg name="id" type="new_id" interface="org_kde_kwin_server_decoration"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+    <enum name="mode">
+      <entry name="None" value="0" summary="undecorated"/>
+      <entry name="Client" value="1" summary="client-side decorations"/>
+      <entry name="Server" value="2" summary="server-side decorations"/>
+    </enum>
+    <event name="default_mode">
+      <arg name="mode" type="uint"/>
+    </event>
+  </interface>
+  <interface name="org_kde_kwin_server_decoration" version="1">
+    <request name="release" type="destructor"/>
+    <enum name="mode">
+      <entry name="None" value="0" summary="undecorated"/>
+      <entry name="Client" value="1" summary="client-side decorations"/>
+      <entry name="Server" value="2" summary="server-side decorations"/>
+    </enum>
+    <request name="request_mode">
+      <arg name="mode" type="uint"/>
+    </request>
+    <event name="mode">
+      <arg name="mode" type="uint"/>
+    </event>
+  </interface>
+</protocol>

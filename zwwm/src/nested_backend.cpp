@@ -67,6 +67,7 @@ struct NestedBackend::Window {
   bool suppress_geometry_animation = false;
   bool track_geometry_animation = false;
   bool camera_motion = false;
+  bool restore_scene = false;
   double camera_scale = 1.0;
   std::int32_t camera_center_x = 0, camera_center_y = 0;
   double camera_offset_x = 0.0, camera_offset_y = 0.0;
@@ -595,6 +596,20 @@ void NestedBackend::publish_dmabuf_importer() {
 }
 
 void NestedBackend::present(const ShmBufferView& buffer) {
+  if (buffer.scene_reset) {
+    animations_.remove(buffer.root_surface_id);
+    for (auto& window : windows_) {
+      if (window.root_id == buffer.root_surface_id || window.id == buffer.root_surface_id) {
+        window.removed = true;
+        window.damaged = true;
+      }
+    }
+    repaint_pending_ = true;
+    if (!camera_frame_preparing_) {
+      if (renderer_ != nullptr) repaint_gpu(); else repaint();
+    }
+    return;
+  }
   if (buffer.camera_frame) {
     camera_frame_preparing_ = !buffer.camera_frame_ready;
     if (buffer.camera_frame_ready) {
@@ -647,7 +662,8 @@ void NestedBackend::present(const ShmBufferView& buffer) {
       window.removed = false; window.tag_outgoing = false;
        window.suppress_geometry_animation = buffer.suppress_geometry_animation;
        window.track_geometry_animation = buffer.track_geometry_animation;
-       window.camera_motion = buffer.camera_motion;
+        window.camera_motion = buffer.camera_motion;
+        window.restore_scene = buffer.restore_scene;
        window.camera_scale = buffer.camera_scale;
        window.camera_center_x = buffer.camera_center_x;
        window.camera_center_y = buffer.camera_center_y;
@@ -777,6 +793,7 @@ void NestedBackend::present(const ShmBufferView& buffer) {
   window.suppress_geometry_animation = buffer.suppress_geometry_animation;
   window.track_geometry_animation = buffer.track_geometry_animation;
   window.camera_motion = buffer.camera_motion;
+  window.restore_scene = buffer.restore_scene;
   window.camera_scale = buffer.camera_scale;
   window.camera_center_x = buffer.camera_center_x;
   window.camera_center_y = buffer.camera_center_y;
@@ -888,13 +905,14 @@ void NestedBackend::repaint_gpu() {
     if (window.toplevel && !window.removed && window.content_ready && window.texture != 0)
       animation_targets.push_back({window.id, bounds,
                                      !window.suppress_geometry_animation,
-                                      !tag || window.tag_outgoing,
-                                      window.track_geometry_animation, window.camera_motion});
+                                       !window.restore_scene && (!tag || window.tag_outgoing),
+                                       window.track_geometry_animation, window.camera_motion || window.restore_scene});
   }
   animations_.update(animation_targets, now);
   for (auto& window : windows_) {
     window.track_geometry_animation = false;
     window.camera_motion = false;
+    window.restore_scene = false;
   }
   for (auto it = windows_.begin(); it != windows_.end();) {
     if (it->removed && !animations_.retains(it->root_id)) {
@@ -1084,9 +1102,9 @@ void NestedBackend::repaint() {
     }
     if (window.toplevel && !window.removed && window.content_ready && !window.pixels.empty())
       animation_targets.push_back({window.id, bounds,
-                                     !window.suppress_geometry_animation,
-                                      !tag || window.tag_outgoing,
-                                      window.track_geometry_animation, window.camera_motion});
+                                      !window.suppress_geometry_animation,
+                                       !window.restore_scene && (!tag || window.tag_outgoing),
+                                       window.track_geometry_animation, window.camera_motion || window.restore_scene});
   }
   const bool camera_moved = std::any_of(windows_.begin(), windows_.end(),
       [](const Window& window) { return window.camera_motion; });
@@ -1094,6 +1112,7 @@ void NestedBackend::repaint() {
   for (auto& window : windows_) {
     window.track_geometry_animation = false;
     window.camera_motion = false;
+    window.restore_scene = false;
   }
   windows_.erase(std::remove_if(windows_.begin(), windows_.end(), [&](const Window& window) {
                    return window.removed && !animations_.retains(window.root_id);

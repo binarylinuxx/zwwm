@@ -8,6 +8,7 @@
 #include <wayland-zwayland-server.h>
 #include <xdg-shell-zwayland-server.h>
 #include <xdg-decoration-zwayland-server.h>
+#include <server-decoration-zwayland-server.h>
 #include <xdg-dialog-zwayland-server.h>
 #include <linux-dmabuf-zwayland-server.h>
 #include <cursor-shape-zwayland-server.h>
@@ -86,6 +87,10 @@ ProtocolGlobals& ProtocolGlobals::operator=(zwayland::server::Display* next) {
     viewporter = next->add_global(&protocol::wp_viewporter_interface, 1, [](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_viewporter)(&client, nullptr, bound_version, id); });
     fractional_scale_manager = next->add_global(&protocol::wp_fractional_scale_manager_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_fractional_scale_manager)(&client, data, bound_version, id); });
     layer_shell = next->add_global(&protocol::zwwm_layer_shell_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_layer_shell)(&client, data, bound_version, id); });
+    kde_decoration_manager = next->add_global(&protocol::org_kde_kwin_server_decoration_manager_interface, 1,
+        [](zwayland::server::Client& client, std::uint32_t version, std::uint32_t id) {
+          bind_kde_decoration_manager(&client, nullptr, version, id);
+        });
     layer_shell_alias = next->add_global(&layer_shell_compat, 4, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_layer_shell)(&client, data, bound_version, id); });
     xwlr_layer_shell = next->add_global(&protocol::xwlr_layer_shell_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_xwlr_layer_shell)(&client, data, bound_version, id); });
     relative_pointer_manager = next->add_global(&protocol::zwp_relative_pointer_manager_v1_interface, 1, [data = observer->seat](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_relative_pointer_manager)(&client, data, bound_version, id); });
@@ -99,6 +104,7 @@ ProtocolGlobals::~ProtocolGlobals() {
     if (xwlr_layer_shell != 0) display->destroy_global(xwlr_layer_shell);
     if (layer_shell_alias != 0) display->destroy_global(layer_shell_alias);
     if (layer_shell != 0) display->destroy_global(layer_shell);
+    if (kde_decoration_manager != 0) display->destroy_global(kde_decoration_manager);
     if (fractional_scale_manager != 0) display->destroy_global(fractional_scale_manager);
     if (viewporter != 0) display->destroy_global(viewporter);
 }
@@ -618,14 +624,15 @@ std::vector<layout::Placement> root_placements(const Observer* observer, const X
   if (observer != nullptr && observer->surfaces != nullptr) {
     for (const auto* surface : *observer->surfaces) {
       const auto* x = surface->xdg_surface;
-      if (x != nullptr && x->toplevel != nullptr && !x->floating && !x->fullscreen && (!output || x->output == output) &&
+      if (x != nullptr && x->toplevel != nullptr && !x->floating &&
+          (!x->fullscreen || !x->restore_floating) && (!output || x->output == output) &&
           (x == candidate || visible_xdg(observer, x))) roots.push_back(surface->id);
 #ifdef ZWWM_XWAYLAND
       const auto* xwayland = surface->xwayland_surface;
       const auto* xwayland_output = xwayland == nullptr ? nullptr :
           output_state(const_cast<Observer*>(observer), xwayland->output);
       if (xwayland != nullptr && xwayland->window != nullptr && xwayland->window->mapped &&
-          !xwayland->floating && !xwayland->fullscreen && (!output || xwayland->output == output) &&
+          !xwayland->floating && (!output || xwayland->output == output) &&
           xwayland_output != nullptr && xwayland->tag == xwayland_output->active_tag)
         roots.push_back(surface->id);
 #endif
@@ -953,6 +960,10 @@ void configure_layout(Observer* observer, XdgSurfaceState* candidate) {
         && xwayland == nullptr
 #endif
         ) continue;
+    if (x != nullptr && x->fullscreen) continue;
+#ifdef ZWWM_XWAYLAND
+    if (xwayland != nullptr && xwayland->fullscreen) continue;
+#endif
     if (candidate != nullptr && !candidate->mapped && x != candidate) continue;
     const Rect slot{placement.bounds.origin.x, placement.bounds.origin.y,
                     static_cast<std::int32_t>(placement.bounds.size.width),
@@ -1206,6 +1217,7 @@ void notify_surface(SurfaceState* s) {
     }
   }
   view.popup = belongs_to_popup(s);
+  view.restore_scene = s->observer->restoring_scene;
   view.unmapped = !root_mapped;
   if (scene_root->xdg_surface != nullptr && scene_root->xdg_surface->toplevel != nullptr) {
     view.window_shader = scene_root->xdg_surface->window_shader;

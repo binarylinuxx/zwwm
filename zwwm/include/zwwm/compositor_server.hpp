@@ -74,6 +74,9 @@ struct ShmBufferView {
   // False until the initial post-configure content commit.
   bool content_ready = true;
   bool unmapped = false;
+  // Lock transitions remove hidden content immediately and restore it without presence animations.
+  bool scene_reset = false;
+  bool restore_scene = false;
   // Brackets atomic publication of an output-local tag transition.
   bool tag_transition = false;
   bool tag_transition_ready = false;

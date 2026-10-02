@@ -63,6 +63,7 @@ add_library(zwwm_compositor STATIC
   src/compositor_server_input.cpp
   src/compositor_server_idle.cpp
   src/compositor_server_layer_shell.cpp
+  src/compositor_server_kde_decoration.cpp
   src/compositor_server_session_lock.cpp
   src/compositor_server_surface_extensions.cpp
 )

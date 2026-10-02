@@ -10,6 +10,12 @@ protocol data. `zwwm-protocols/protocols/upstream/wayland-protocols/` contains
 the wayland-protocols 1.49 protocol XML snapshot. Copyright and permission
 notices are retained in the individual XML and data files.
 
+## KDE Server Decoration Protocol
+
+`zwwm-protocols/protocols/server-decoration.xml` is adapted from KDE's
+plasma-wayland-protocols server-decoration XML. Copyright 2015 Martin Gräßlin;
+licensed under LGPL-2.1-or-later, as recorded in the file's SPDX notice.
+
 ## stb_image_write
 
 `xdg-desktop-portal-zwwm/vendor/stb_image_write.h` is from nothings/stb at

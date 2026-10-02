@@ -239,6 +239,7 @@ struct RuntimeBackend::DrmOutput {
     bool suppress_geometry_animation = false;
     bool track_geometry_animation = false;
     bool camera_motion = false;
+    bool restore_scene = false;
     double camera_scale = 1.0;
     std::int32_t camera_center_x = 0, camera_center_y = 0;
     double camera_offset_x = 0.0, camera_offset_y = 0.0;
@@ -837,6 +838,14 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
       card->tag_transition_preparing = true;
       continue;
     }
+    if (buffer.scene_reset) {
+      const auto root_id = buffer.root_surface_id;
+      card->animations.remove(root_id);
+      for (auto& item : card->shm_textures)
+        if (item.root_id == root_id || item.id == root_id) item.removed = true;
+      if (!card->camera_frame_preparing) repaint(*card);
+      continue;
+    }
     auto surface = std::find_if(card->shm_textures.begin(), card->shm_textures.end(), [&buffer](const auto& item) {
       return item.id == buffer.surface_id;
     });
@@ -880,6 +889,7 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
         updated.suppress_geometry_animation = buffer.suppress_geometry_animation;
         updated.track_geometry_animation = buffer.track_geometry_animation;
         updated.camera_motion = buffer.camera_motion;
+        updated.restore_scene = buffer.restore_scene;
         updated.camera_scale = buffer.camera_scale;
         updated.camera_center_x = buffer.camera_center_x;
         updated.camera_center_y = buffer.camera_center_y;
@@ -989,6 +999,7 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
     updated.suppress_geometry_animation = buffer.suppress_geometry_animation;
     updated.track_geometry_animation = buffer.track_geometry_animation;
     updated.camera_motion = buffer.camera_motion;
+    updated.restore_scene = buffer.restore_scene;
     updated.camera_scale = buffer.camera_scale;
     updated.camera_center_x = buffer.camera_center_x;
     updated.camera_center_y = buffer.camera_center_y;
@@ -1422,12 +1433,14 @@ void RuntimeBackend::repaint(DrmOutput& card) {
     if (surface.toplevel && !surface.removed && surface.content_ready && surface.texture != 0)
       animation_targets.push_back(
           {surface.id, bounds, !surface.suppress_geometry_animation,
-            !tag || surface.tag_outgoing, surface.track_geometry_animation, surface.camera_motion});
+            !surface.restore_scene && (!tag || surface.tag_outgoing), surface.track_geometry_animation,
+            surface.camera_motion || surface.restore_scene});
   }
   card.animations.update(animation_targets, now);
   for (auto& surface : card.shm_textures) {
     surface.track_geometry_animation = false;
     surface.camera_motion = false;
+    surface.restore_scene = false;
   }
   for (auto it = card.shm_textures.begin(); it != card.shm_textures.end();) {
     if (it->removed && !card.animations.retains(it->root_id)) {

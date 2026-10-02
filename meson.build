@@ -115,6 +115,7 @@ protocol_specs = [
   ['zwwm-data-control-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-data-control-v1.xml')],
   ['wlr-data-control-unstable-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/wlr-data-control-unstable-v1.xml')],
   ['zwwm-layer-shell-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-layer-shell-v1.xml')],
+  ['server-decoration', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/server-decoration.xml')],
   ['xwlr-layer-shell-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/xwlr-layer-shell-v1.xml')],
   ['zwwm-screencopy-view-unstable-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-screencopy-view-unstable-v1.xml')],
   ['ext-zwwm-toplevels-unstable-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/ext-zwwm-toplevels-unstable-v1.xml')],
@@ -290,6 +291,7 @@ compositor_sources = files(
   'zwwm/src/compositor_server_input.cpp',
   'zwwm/src/compositor_server_idle.cpp',
   'zwwm/src/compositor_server_layer_shell.cpp',
+  'zwwm/src/compositor_server_kde_decoration.cpp',
   'zwwm/src/compositor_server_session_lock.cpp',
   'zwwm/src/compositor_server_surface_extensions.cpp',
 )

@@ -76,6 +76,7 @@ zwwm_add_project_protocol(zwwm-tags-unstable-v1 protocols/zwwm-tags-unstable-v1.
 zwwm_add_project_protocol(zwwm-data-control-v1 protocols/zwwm-data-control-v1.xml)
 zwwm_add_project_protocol(wlr-data-control-unstable-v1 protocols/wlr-data-control-unstable-v1.xml)
 zwwm_add_project_protocol(zwwm-layer-shell-v1 protocols/zwwm-layer-shell-v1.xml)
+zwwm_add_project_protocol(server-decoration protocols/server-decoration.xml)
 zwwm_add_project_protocol(xwlr-layer-shell-v1 protocols/xwlr-layer-shell-v1.xml)
 zwwm_add_project_protocol(zwwm-screencopy-view-unstable-v1 protocols/zwwm-screencopy-view-unstable-v1.xml)
 zwwm_add_project_protocol(ext-zwwm-toplevels-unstable-v1 protocols/ext-zwwm-toplevels-unstable-v1.xml)
