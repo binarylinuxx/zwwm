@@ -26,6 +26,8 @@ void blank_unlocked_scene(SessionLockState* lock) {
   auto* observer = lock->observer;
   auto* seat = observer->seat;
   scene_batch(observer, false);
+  cancel_touches(seat);
+  reset_virtual_keyboards(seat);
   for (auto* constraint : seat->constraints) deactivate_constraint(constraint, true);
   set_pointer_focus(seat, nullptr, 0, 0);
   set_keyboard_focus(seat, nullptr);

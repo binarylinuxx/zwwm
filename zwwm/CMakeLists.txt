@@ -61,9 +61,11 @@ add_library(zwwm_compositor STATIC
   src/compositor_server_buffers.cpp
   src/compositor_server_data_device.cpp
   src/compositor_server_input.cpp
+  src/compositor_server_virtual_keyboard.cpp
+  src/compositor_server_touch.cpp
   src/compositor_server_idle.cpp
   src/compositor_server_layer_shell.cpp
-  src/compositor_server_kde_decoration.cpp
+  src/compositor_server_decoration.cpp
   src/compositor_server_session_lock.cpp
   src/compositor_server_surface_extensions.cpp
 )
@@ -81,6 +83,7 @@ endif()
 target_compile_options(zwwm_compositor PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 add_executable(zwwm src/main.cpp src/plugin_loader.cpp src/error_popup.cpp src/manager_protocol.cpp src/nested_backend.cpp src/runtime_backend.cpp src/portal_capture.cpp)
+target_sources(zwwm PRIVATE src/nested_backend_touch.cpp)
 target_include_directories(zwwm PRIVATE include)
 target_link_libraries(zwwm PRIVATE
   zwayland-server

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <protocol name="ext_zwwm_manager_v1">
-  <copyright>Copyright 2026 zwwm contributors</copyright>
+  <copyright>Copyright 2026 binarylinuxx</copyright>
 
   <interface name="ext_zwwm_manager_v1" version="6">
     <description summary="zwwm control and state manager">

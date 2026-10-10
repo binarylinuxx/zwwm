@@ -8,7 +8,8 @@
 #include <wayland-zwayland-server.h>
 #include <xdg-shell-zwayland-server.h>
 #include <xdg-decoration-zwayland-server.h>
-#include <server-decoration-zwayland-server.h>
+#include <zwwm-decoration-manager-v1-zwayland-server.h>
+#include <zwwm-virtual-keyboard-v1-zwayland-server.h>
 #include <xdg-dialog-zwayland-server.h>
 #include <linux-dmabuf-zwayland-server.h>
 #include <cursor-shape-zwayland-server.h>
@@ -87,9 +88,17 @@ ProtocolGlobals& ProtocolGlobals::operator=(zwayland::server::Display* next) {
     viewporter = next->add_global(&protocol::wp_viewporter_interface, 1, [](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_viewporter)(&client, nullptr, bound_version, id); });
     fractional_scale_manager = next->add_global(&protocol::wp_fractional_scale_manager_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_fractional_scale_manager)(&client, data, bound_version, id); });
     layer_shell = next->add_global(&protocol::zwwm_layer_shell_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_layer_shell)(&client, data, bound_version, id); });
-    kde_decoration_manager = next->add_global(&protocol::org_kde_kwin_server_decoration_manager_interface, 1,
+    zwwm_decoration_manager = next->add_global(&protocol::zwwm_decoration_manager_v1_interface, 1,
         [](zwayland::server::Client& client, std::uint32_t version, std::uint32_t id) {
-          bind_kde_decoration_manager(&client, nullptr, version, id);
+          bind_zwwm_decoration_manager(&client, nullptr, version, id);
+        });
+    decoration_compat_manager = next->add_global(&decoration_compat_interface(), 1,
+        [](zwayland::server::Client& client, std::uint32_t version, std::uint32_t id) {
+          bind_decoration_compat_manager(&client, nullptr, version, id);
+        });
+    virtual_keyboard_manager = next->add_global(&protocol::zwwm_virtual_keyboard_manager_v1_interface, 1,
+        [seat = observer->seat](zwayland::server::Client& client, std::uint32_t version, std::uint32_t id) {
+          bind_virtual_keyboard_manager(&client, seat, version, id);
         });
     layer_shell_alias = next->add_global(&layer_shell_compat, 4, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_layer_shell)(&client, data, bound_version, id); });
     xwlr_layer_shell = next->add_global(&protocol::xwlr_layer_shell_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_xwlr_layer_shell)(&client, data, bound_version, id); });
@@ -104,7 +113,9 @@ ProtocolGlobals::~ProtocolGlobals() {
     if (xwlr_layer_shell != 0) display->destroy_global(xwlr_layer_shell);
     if (layer_shell_alias != 0) display->destroy_global(layer_shell_alias);
     if (layer_shell != 0) display->destroy_global(layer_shell);
-    if (kde_decoration_manager != 0) display->destroy_global(kde_decoration_manager);
+    if (zwwm_decoration_manager != 0) display->destroy_global(zwwm_decoration_manager);
+    if (decoration_compat_manager != 0) display->destroy_global(decoration_compat_manager);
+    if (virtual_keyboard_manager != 0) display->destroy_global(virtual_keyboard_manager);
     if (fractional_scale_manager != 0) display->destroy_global(fractional_scale_manager);
     if (viewporter != 0) display->destroy_global(viewporter);
 }
@@ -2732,6 +2743,7 @@ using namespace detail;
 struct CompositorServer::Impl { std::uint32_t compositor = 0, shm = 0, wm = 0, dialog_manager = 0, decoration_manager = 0, cursor_shape_manager = 0, pointer_constraints = 0, relative_pointer_manager = 0, seat = 0, sub = 0, dmabuf = 0, data_device_manager = 0, data_control_manager = 0, wlr_data_control_manager = 0, session_lock_manager = 0, tags_manager = 0; std::shared_ptr<const RuntimeConfig> config; Observer observer; TagsState tags; std::vector<SurfaceState*> surfaces; SeatState seat_state; DmabufState dmabuf_state; std::vector<std::unique_ptr<OutputState>> outputs; std::vector<std::unique_ptr<OutputState>> retired_outputs; OutputId active_output; ExternalActionHandler external_action = nullptr; void* external_action_data = nullptr; ~Impl() { const auto release = [this](auto& list) { for (auto& state : list) { if (state->global != 0) seat_state.display.display->destroy_global(state->global); for (auto* resource : state->resources) resource->userdata.reset(); } }; release(outputs); release(retired_outputs); } };
  CompositorServer::CompositorServer(zwayland::server::Display* d, std::shared_ptr<const RuntimeConfig> config) : impl_(new Impl) { impl_->config = std::move(config); if (impl_->config == nullptr) { delete impl_; impl_ = nullptr; throw std::invalid_argument("runtime configuration is required"); } impl_->observer.surfaces = &impl_->surfaces;
   impl_->observer.seat = &impl_->seat_state;
+  impl_->seat_state.compositor = this;
   impl_->observer.config = impl_->config.get();
   impl_->observer.tags = &impl_->tags;
   impl_->observer.camera.set_config({
@@ -4337,9 +4349,51 @@ void CompositorServer::pointer_axis(std::uint32_t time, std::uint32_t axis, doub
   send_pointer_frame(&seat, client);
 }
 void CompositorServer::keyboard_key(std::uint32_t time, std::uint32_t key, std::uint32_t state) {
+  keyboard_key_from_source(0, time, key, state);
+}
+void CompositorServer::touch_down(std::uint32_t time, std::int32_t id, std::int32_t x, std::int32_t y) {
+  const auto previous = impl_->active_output;
+  deliver_touch_down(&impl_->seat_state, time, id, x, y);
+  impl_->active_output = impl_->observer.active_output;
+  if (previous != impl_->active_output) notify_active_tags(&impl_->observer);
+}
+void CompositorServer::touch_motion(std::uint32_t time, std::int32_t id, std::int32_t x, std::int32_t y) {
+  deliver_touch_motion(&impl_->seat_state, time, id, x, y);
+}
+void CompositorServer::touch_up(std::uint32_t time, std::int32_t id) {
+  deliver_touch_up(&impl_->seat_state, time, id);
+}
+void CompositorServer::touch_frame() { deliver_touch_frame(&impl_->seat_state); }
+void CompositorServer::touch_cancel() { cancel_touches(&impl_->seat_state); }
+void CompositorServer::release_keyboard_source(std::uint64_t source) {
+  auto& seat = impl_->seat_state;
+  const auto found = seat.keyboard_sources.find(source);
+  if (found == seat.keyboard_sources.end()) return;
+  const auto held = found->second;
+  for (const auto key : held)
+    keyboard_key_from_source(source, timestamp_ms(), key, protocol::WL_KEYBOARD_KEY_STATE_RELEASED);
+}
+void CompositorServer::keyboard_key_from_source(std::uint64_t source, std::uint32_t time,
+                                               std::uint32_t key, std::uint32_t state) {
   auto& seat = impl_->seat_state;
   if (state != protocol::WL_KEYBOARD_KEY_STATE_PRESSED && state != protocol::WL_KEYBOARD_KEY_STATE_RELEASED) return;
   idle_activity(&seat);
+  auto source_keys = seat.keyboard_sources.find(source);
+  if (state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED) {
+    if (source_keys == seat.keyboard_sources.end())
+      source_keys = seat.keyboard_sources.emplace(source, std::vector<std::uint32_t>{}).first;
+    auto& keys = source_keys->second;
+    if (std::find(keys.begin(), keys.end(), key) != keys.end()) return;
+    keys.push_back(key);
+  } else {
+    if (source_keys == seat.keyboard_sources.end() ||
+        std::find(source_keys->second.begin(), source_keys->second.end(), key) == source_keys->second.end()) return;
+    std::erase(source_keys->second, key);
+    if (source_keys->second.empty()) seat.keyboard_sources.erase(source_keys);
+    if (std::any_of(seat.keyboard_sources.begin(), seat.keyboard_sources.end(), [key](const auto& item) {
+      return std::find(item.second.begin(), item.second.end(), key) != item.second.end();
+    })) return;
+  }
   const auto existing = std::find(seat.pressed_keys.begin(), seat.pressed_keys.end(), key);
   if ((state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED && existing != seat.pressed_keys.end()) || (state == protocol::WL_KEYBOARD_KEY_STATE_RELEASED && existing == seat.pressed_keys.end())) return;
   if (state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED) seat.pressed_keys.push_back(key); else seat.pressed_keys.erase(existing);
@@ -4348,6 +4402,7 @@ void CompositorServer::keyboard_key(std::uint32_t time, std::uint32_t key, std::
   if (seat.xkb_state_handle != nullptr && key <= std::numeric_limits<xkb_keycode_t>::max() - 8) xkb_state_update_key(seat.xkb_state_handle, static_cast<xkb_keycode_t>(key + 8), state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED ? XKB_KEY_DOWN : XKB_KEY_UP);
   const auto new_group = seat.xkb_state_handle == nullptr ? 0U :
       xkb_state_serialize_layout(seat.xkb_state_handle, XKB_STATE_LAYOUT_EFFECTIVE);
+  publish_virtual_modifiers(&seat);
   if (old_group != new_group && impl_->observer.event_callback != nullptr)
     impl_->observer.event_callback(impl_->observer.event_data, "keyboard");
   if (state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED && seat.session_lock == nullptr) {
@@ -4441,7 +4496,28 @@ void CompositorServer::keyboard_modifiers(std::uint32_t depressed, std::uint32_t
   if (old_group != new_group && impl_->observer.event_callback != nullptr)
     impl_->observer.event_callback(impl_->observer.event_data, "keyboard");
   send_modifiers(seat);
+  publish_virtual_modifiers(&seat);
 }
 void CompositorServer::keyboard_repeat_info(std::int32_t rate, std::int32_t delay) { if (rate < 0 || delay < 0) return; auto& seat = impl_->seat_state; seat.repeat_rate = rate; seat.repeat_delay = delay; for (auto* resource : seat.keyboards) if (resource->version >= 4) protocol::wl_keyboard_send_repeat_info(*resource, rate, delay); }
-void CompositorServer::input_reset(bool preserve_keyboard_focus) { auto& seat = impl_->seat_state; cancel_drag(&seat); end_interactive(&seat); seat.pressed_buttons.clear(); seat.pressed_keys.clear(); seat.pointer_grab = nullptr; seat.popup_grab = nullptr; seat.button_client = nullptr; seat.button_serial = 0; seat.button = 0; set_pointer_focus(&seat, nullptr, 0, 0); if (!preserve_keyboard_focus) set_keyboard_focus(&seat, nullptr); if (seat.xkb_state_handle != nullptr) xkb_state_update_mask(seat.xkb_state_handle, 0, 0, 0, 0, 0, 0); if (preserve_keyboard_focus) send_modifiers(seat); }
+void CompositorServer::input_reset(bool preserve_keyboard_focus) {
+  auto& seat = impl_->seat_state;
+  cancel_touches(&seat);
+  reset_virtual_keyboards(&seat);
+  release_keyboard_source(0);
+  seat.keyboard_sources.clear();
+  cancel_drag(&seat);
+  end_interactive(&seat);
+  seat.pressed_buttons.clear();
+  seat.pressed_keys.clear();
+  seat.pointer_grab = nullptr;
+  seat.popup_grab = nullptr;
+  seat.button_client = nullptr;
+  seat.button_serial = 0;
+  seat.button = 0;
+  set_pointer_focus(&seat, nullptr, 0, 0);
+  if (!preserve_keyboard_focus) set_keyboard_focus(&seat, nullptr);
+  if (seat.xkb_state_handle != nullptr) xkb_state_update_mask(seat.xkb_state_handle, 0, 0, 0, 0, 0, 0);
+  publish_virtual_modifiers(&seat);
+  if (preserve_keyboard_focus) send_modifiers(seat);
+}
 }  // namespace zwwm

@@ -7,6 +7,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <unordered_map>
 
 #include "zwwm/output.hpp"
 #include "zwwm/error_popup.hpp"
@@ -107,6 +108,7 @@ class RuntimeBackend {
   bool right_alt_pressed_ = false;
   std::uint32_t consumed_vt_key_ = 0;
   CompositorServer* input_target_ = nullptr;
+  std::unordered_map<std::int32_t, OutputId> touch_outputs_;
   GestureObserver gesture_observer_ = nullptr;
   void* gesture_data_ = nullptr;
   std::shared_ptr<const RuntimeConfig> config_;

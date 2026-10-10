@@ -1136,6 +1136,7 @@ void RuntimeBackend::disable_seat(libseat* seat, void* data) {
   backend->left_alt_pressed_ = false;
   backend->right_alt_pressed_ = false;
   backend->consumed_vt_key_ = 0;
+  backend->touch_outputs_.clear();
   if (backend->input_target_ != nullptr) backend->input_target_->input_reset(true);
   if (backend->libinput_ != nullptr && !backend->libinput_suspended_) {
     libinput_suspend(backend->libinput_);
@@ -1275,6 +1276,49 @@ void RuntimeBackend::dispatch_libinput() {
         cursor_y_ = std::clamp(static_cast<double>(logical.y), 0.0, static_cast<double>(output_height_ - 1));
         input_target_->pointer_motion_global(libinput_event_pointer_get_time(pointer), static_cast<std::int32_t>(std::lround(cursor_x_)), static_cast<std::int32_t>(std::lround(cursor_y_)));
         for (auto& device : devices_) for (auto& output : device->outputs) repaint(*output);
+      } else if (type == LIBINPUT_EVENT_TOUCH_FRAME) {
+        input_target_->touch_frame();
+      } else if (type == LIBINPUT_EVENT_TOUCH_CANCEL) {
+        input_target_->touch_cancel();
+        touch_outputs_.clear();
+      } else if (type == LIBINPUT_EVENT_TOUCH_UP) {
+        auto* touch = libinput_event_get_touch_event(event);
+        const auto slot = libinput_event_touch_get_seat_slot(touch);
+        input_target_->touch_up(libinput_event_touch_get_time(touch), slot);
+        touch_outputs_.erase(slot);
+      } else if (type == LIBINPUT_EVENT_TOUCH_DOWN || type == LIBINPUT_EVENT_TOUCH_MOTION) {
+        auto* touch = libinput_event_get_touch_event(event);
+        const auto slot = libinput_event_touch_get_seat_slot(touch);
+        DrmOutput* selected = nullptr;
+        const auto assigned = touch_outputs_.find(slot);
+        for (const auto& device : devices_) for (const auto& output : device->outputs) {
+          if (assigned != touch_outputs_.end()) {
+            if (output->output.id == assigned->second) selected = output.get();
+          } else if (type == LIBINPUT_EVENT_TOUCH_DOWN &&
+                     (selected == nullptr || output->output.connector < selected->output.connector)) {
+            selected = output.get();
+          }
+        }
+        if (selected != nullptr) {
+          const auto& info = selected->output;
+          const renderer::Point physical{
+              std::clamp(static_cast<std::int32_t>(std::lround(
+                  libinput_event_touch_get_x_transformed(touch, info.physical_width))),
+                  0, static_cast<std::int32_t>(info.physical_width) - 1),
+              std::clamp(static_cast<std::int32_t>(std::lround(
+                  libinput_event_touch_get_y_transformed(touch, info.physical_height))),
+                  0, static_cast<std::int32_t>(info.physical_height) - 1)};
+          const auto logical = config_->output_for(info.connector).physical_to_logical(
+              physical, {info.physical_width, info.physical_height});
+          const auto time = libinput_event_touch_get_time(touch);
+          if (type == LIBINPUT_EVENT_TOUCH_DOWN) {
+            touch_outputs_[slot] = info.id;
+            input_target_->touch_down(time, slot, info.logical_x + logical.x, info.logical_y + logical.y);
+          } else input_target_->touch_motion(time, slot, info.logical_x + logical.x, info.logical_y + logical.y);
+        } else if (assigned != touch_outputs_.end()) {
+          input_target_->touch_cancel();
+          touch_outputs_.clear();
+        }
       } else if (type == LIBINPUT_EVENT_POINTER_BUTTON) {
         auto* pointer = libinput_event_get_pointer_event(event);
         input_target_->pointer_button(libinput_event_pointer_get_time(pointer), libinput_event_pointer_get_button(pointer), libinput_event_pointer_get_button_state(pointer) == LIBINPUT_BUTTON_STATE_PRESSED ? protocol::WL_POINTER_BUTTON_STATE_PRESSED : protocol::WL_POINTER_BUTTON_STATE_RELEASED);

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="zwwm_virtual_keyboard_v1">
+  <copyright>Copyright 2026 binarylinuxx. SPDX-License-Identifier: BSD-3-Clause</copyright>
+  <interface name="zwwm_virtual_keyboard_manager_v1" version="1">
+    <description summary="create native on-screen keyboards">
+      Virtual keyboards use the compositor's current XKB keymap. They inject
+      Linux evdev keycodes into the selected seat, with normal modifier and
+      compositor-binding handling. Client-supplied keymaps are not used.
+      Key injection is unavailable during session lock.
+    </description>
+    <enum name="error"><entry name="invalid_seat" value="0"/></enum>
+    <request name="create_keyboard">
+      <arg name="id" type="new_id" interface="zwwm_virtual_keyboard_v1"/>
+      <arg name="seat" type="object" interface="wl_seat"/>
+    </request>
+    <request name="destroy" type="destructor"/>
+  </interface>
+  <interface name="zwwm_virtual_keyboard_v1" version="1">
+    <enum name="error">
+      <entry name="invalid_key" value="0"/>
+      <entry name="invalid_state" value="1"/>
+    </enum>
+    <enum name="key_state"><entry name="released" value="0"/><entry name="pressed" value="1"/></enum>
+    <request name="key">
+      <description summary="press or release an evdev key">
+        Time is a monotonic timestamp in milliseconds. Keycodes use evdev
+        numbering; add 8 when looking up a key in the supplied XKB keymap.
+        Modifiers are pressed/released as ordinary keys. Duplicate presses
+        and unmatched releases are ignored. Destroying this object releases
+        all keys held by it without releasing keys held by other devices.
+      </description>
+      <arg name="time" type="uint"/><arg name="key" type="uint"/>
+      <arg name="state" type="uint" enum="key_state"/>
+    </request>
+    <request name="destroy" type="destructor"/>
+    <event name="keymap">
+      <description summary="current compositor keymap">
+        Sent at creation and when the configured keymap changes. Format is
+        wl_keyboard.keymap_format.xkb_v1. The descriptor contains a NUL-terminated
+        XKB keymap; size includes the NUL. The receiving client owns the fd.
+      </description>
+      <arg name="format" type="uint"/><arg name="fd" type="fd"/><arg name="size" type="uint"/>
+    </event>
+    <event name="modifiers">
+      <arg name="depressed" type="uint"/><arg name="latched" type="uint"/>
+      <arg name="locked" type="uint"/><arg name="group" type="uint"/>
+    </event>
+    <event name="reset">
+      <description summary="held keys were cleared">
+        Clear the on-screen pressed-key indicators. Sent when the seat resets
+        or the session locks. Future presses begin a new key sequence.
+      </description>
+    </event>
+  </interface>
+</protocol>

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="zwwm_decoration_manager_v1">
+  <copyright>
+    SPDX-FileCopyrightText: 2026 binarylinuxx
+    SPDX-License-Identifier: BSD-3-Clause
+  </copyright>
+  <interface name="zwwm_decoration_manager_v1" version="1">
+    <description summary="zwwm surface decoration policy">
+      Reports the compositor's preferred decoration mode. Clients use this
+      information to enable or disable their titlebars, borders, and shadows.
+      The compositor controls the selected mode and may reject a preference.
+      This protocol is independent of KDE server-decoration. Clients should
+      select either this protocol or xdg-decoration for an individual surface.
+    </description>
+    <enum name="mode">
+      <entry name="client_side" value="1" summary="client draws decorations"/>
+      <entry name="server_side" value="2" summary="compositor draws decorations"/>
+    </enum>
+    <enum name="error">
+      <entry name="invalid_surface" value="0" summary="surface is not a live client-owned wl_surface"/>
+    </enum>
+    <request name="get_decoration">
+      <description summary="create a surface decoration policy object">
+        The compositor sends configure immediately after creation. A client
+        must disable its own decorations when server_side is selected and
+        apply that choice on its next surface commit. Destroying the manager
+        does not destroy existing surface decoration objects.
+      </description>
+      <arg name="id" type="new_id" interface="zwwm_surface_decoration_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+    <request name="destroy" type="destructor"/>
+    <event name="default_mode">
+      <description summary="preferred mode for newly created surfaces">
+        Sent immediately after binding. It lets clients choose decorations
+        before constructing or mapping their windows. Per-surface configure
+        events are authoritative if they differ from this default.
+      </description>
+      <arg name="mode" type="uint" enum="mode"/>
+    </event>
+  </interface>
+  <interface name="zwwm_surface_decoration_v1" version="1">
+    <enum name="error">
+      <entry name="invalid_mode" value="0" summary="unknown decoration mode"/>
+    </enum>
+    <request name="set_mode">
+      <description summary="request a decoration mode">
+        The compositor replies with configure containing its selected mode,
+        even if it rejects the requested preference. Requests do not require
+        an xdg_toplevel and may be made before mapping the wl_surface.
+      </description>
+      <arg name="mode" type="uint" enum="zwwm_decoration_manager_v1.mode"/>
+    </request>
+    <request name="destroy" type="destructor"/>
+    <event name="configure">
+      <arg name="mode" type="uint" enum="zwwm_decoration_manager_v1.mode"/>
+    </event>
+  </interface>
+</protocol>

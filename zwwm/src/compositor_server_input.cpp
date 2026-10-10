@@ -26,7 +26,7 @@ namespace zwwm::detail {
 
 struct CursorShapeDevice { SeatState* seat = nullptr; zwayland::server::Resource* pointer = nullptr; Observer* observer = nullptr; };
 
-SeatState::~SeatState() { while (!idle_notifications.empty()) idle_notifications.back()->resource->destroy(); while (!relative_pointers.empty()) relative_pointers.back()->resource->destroy(); }
+SeatState::~SeatState() { while (!touches.empty()) touches.back()->destroy(); while (!idle_notifications.empty()) idle_notifications.back()->resource->destroy(); while (!relative_pointers.empty()) relative_pointers.back()->resource->destroy(); }
 
 bool update_xkb(SeatState* seat, const KeyboardConfig& config) {
   if (seat->xkb_context_handle == nullptr) return false;
@@ -61,7 +61,15 @@ bool initialize_xkb(SeatState* seat) {
   return config != nullptr && update_xkb(seat, config->keyboard);
 }
 
-void release_xkb(SeatState* seat) { if (seat->xkb_state_handle != nullptr) xkb_state_unref(seat->xkb_state_handle); if (seat->xkb_keymap_handle != nullptr) xkb_keymap_unref(seat->xkb_keymap_handle); if (seat->xkb_context_handle != nullptr) xkb_context_unref(seat->xkb_context_handle); }
+void release_xkb(SeatState* seat) {
+  while (!seat->virtual_keyboards.empty()) seat->virtual_keyboards.back()->destroy();
+  if (seat->xkb_state_handle != nullptr) xkb_state_unref(seat->xkb_state_handle);
+  if (seat->xkb_keymap_handle != nullptr) xkb_keymap_unref(seat->xkb_keymap_handle);
+  if (seat->xkb_context_handle != nullptr) xkb_context_unref(seat->xkb_context_handle);
+  seat->xkb_state_handle = nullptr;
+  seat->xkb_keymap_handle = nullptr;
+  seat->xkb_context_handle = nullptr;
+}
 
 UniqueFd keymap_fd(const SeatState& seat) { constexpr unsigned kMfdCloexec = 0x0001U, kMfdAllowSealing = 0x0002U; constexpr int kAddSeals = 1033, kSealShrink = 0x0002, kSealGrow = 0x0004, kSealWrite = 0x0008; int descriptor = -1;
 #ifdef SYS_memfd_create
@@ -75,6 +83,7 @@ bool valid_selection_serial(const SeatState& seat, zwayland::server::Client* cli
 void send_modifiers(SeatState& seat) { if (seat.keyboard_focus == nullptr || seat.xkb_state_handle == nullptr) return; const auto depressed = xkb_state_serialize_mods(seat.xkb_state_handle, XKB_STATE_MODS_DEPRESSED), latched = xkb_state_serialize_mods(seat.xkb_state_handle, XKB_STATE_MODS_LATCHED), locked = xkb_state_serialize_mods(seat.xkb_state_handle, XKB_STATE_MODS_LOCKED), group = xkb_state_serialize_layout(seat.xkb_state_handle, XKB_STATE_LAYOUT_EFFECTIVE); const auto serial = seat.display->next_serial(); auto* client = seat.keyboard_focus->resource->client; bool sent = false; for (auto* resource : seat.keyboards) if (resource->client == client) { protocol::wl_keyboard_send_modifiers(*resource, serial, depressed, latched, locked, group); sent = true; } if (sent) remember_serial(seat, client, serial); }
 
 void publish_keymap(SeatState* seat) {
+  publish_virtual_keymap(seat);
   if (seat->keyboards.empty()) return;
   const auto fd = keymap_fd(*seat);
   if (!fd) return;
@@ -638,14 +647,15 @@ void bind_seat(zwayland::server::Client* c, void* data, std::uint32_t v, std::ui
       })(&client, &resource, id);
   }
   void get_touch(zwayland::server::Client& client, zwayland::server::Resource& resource, std::uint32_t id) {
-    ([](zwayland::server::Client*, zwayland::server::Resource*, std::uint32_t) {})(&client, &resource, id);
+    bind_touch(&client, resource.data<SeatState>(), resource.version, id);
   }
   void release(zwayland::server::Client& client, zwayland::server::Resource& resource) {
     ([](zwayland::server::Client*, zwayland::server::Resource* resource) { resource->destroy(); })(&client, &resource);
   }
 };
   r->set_data(seat); r->set_handler(protocol::wl_seat_handler(WlSeatImplHandler{}));
-  protocol::wl_seat_send_capabilities(*r, protocol::WL_SEAT_CAPABILITY_POINTER | protocol::WL_SEAT_CAPABILITY_KEYBOARD);
+  protocol::wl_seat_send_capabilities(*r, protocol::WL_SEAT_CAPABILITY_POINTER | protocol::WL_SEAT_CAPABILITY_KEYBOARD |
+                                       protocol::WL_SEAT_CAPABILITY_TOUCH);
   if (r->version >= 2) protocol::wl_seat_send_name(*r, "seat0");
 }
 

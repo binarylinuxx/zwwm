@@ -157,7 +157,9 @@ struct ProtocolGlobals {
   std::uint32_t viewporter = 0;
   std::uint32_t fractional_scale_manager = 0;
   std::uint32_t layer_shell = 0;
-  std::uint32_t kde_decoration_manager = 0;
+  std::uint32_t zwwm_decoration_manager = 0;
+  std::uint32_t decoration_compat_manager = 0;
+  std::uint32_t virtual_keyboard_manager = 0;
   std::uint32_t layer_shell_alias = 0;
   std::uint32_t xwlr_layer_shell = 0;
   std::uint32_t relative_pointer_manager = 0;
@@ -170,6 +172,7 @@ struct ProtocolGlobals {
 };
 
 struct SeatState {
+  CompositorServer* compositor = nullptr;
   struct ClusterMember { std::uint64_t id = 0; CanvasBounds start; };
   ~SeatState();
   ProtocolGlobals display;
@@ -179,6 +182,18 @@ struct SeatState {
   std::string keymap;
   std::vector<zwayland::server::Resource*> pointers;
   std::vector<zwayland::server::Resource*> keyboards;
+  std::vector<zwayland::server::Resource*> virtual_keyboards;
+  std::vector<zwayland::server::Resource*> touches;
+  struct TouchPoint {
+    SurfaceState* surface;
+    std::shared_ptr<bool> alive;
+    zwayland::server::Client* client;
+    std::vector<zwayland::server::Resource*> recipients;
+  };
+  std::unordered_map<std::int32_t, TouchPoint> touch_points;
+  std::vector<zwayland::server::Client*> touch_frame_clients;
+  std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> keyboard_sources;
+  std::uint64_t next_keyboard_source = 1;
   SurfaceState* pointer_focus = nullptr;
   SurfaceState* hit_target = nullptr;
   SurfaceState* toplevel_focus = nullptr;
@@ -305,7 +320,22 @@ void configure_layer_surface(LayerSurfaceState* layer, Rect area);
 void associate_layer_popup(LayerSurfaceState* layer, zwayland::server::Client* client, zwayland::server::Resource* layer_resource,
                            zwayland::server::Resource* popup_resource);
 void bind_layer_shell(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
-void bind_kde_decoration_manager(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
+void bind_zwwm_decoration_manager(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
+void bind_virtual_keyboard_manager(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
+void publish_virtual_keymap(SeatState* seat);
+void publish_virtual_modifiers(SeatState* seat);
+void reset_virtual_keyboards(SeatState* seat);
+UniqueFd keymap_fd(const SeatState& seat);
+SurfaceState* surface_at_global(const Observer* observer, std::int32_t x, std::int32_t y);
+bool managed_surface(const SurfaceState* surface);
+void deliver_touch_down(SeatState*, std::uint32_t, std::int32_t, std::int32_t, std::int32_t);
+void deliver_touch_motion(SeatState*, std::uint32_t, std::int32_t, std::int32_t, std::int32_t);
+void deliver_touch_up(SeatState*, std::uint32_t, std::int32_t);
+void deliver_touch_frame(SeatState*);
+void cancel_touches(SeatState*);
+void bind_touch(zwayland::server::Client*, SeatState*, std::uint32_t, std::uint32_t);
+const zwayland::server::Interface& decoration_compat_interface();
+void bind_decoration_compat_manager(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
 void bind_xwlr_layer_shell(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
 void bind_session_lock_manager(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
 void configure_session_lock_outputs(SessionLockState* lock);

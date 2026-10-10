@@ -11,6 +11,7 @@ even though in 2026 everyone seems to be rewriting everything in Rust.
 
 - Atomic DRM/KMS and nested Wayland backends
 - libinput and XKB keyboard support
+- Touchscreen input and a native virtual-keyboard protocol for on-screen keyboard clients
 - Master-stack tiling, floating windows, fullscreen, and tags
 - Xwayland windows integrated into layout, focus, actions, and clipboard
 - custom shaders

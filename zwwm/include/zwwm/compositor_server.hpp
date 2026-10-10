@@ -219,6 +219,14 @@ class CompositorServer {
                     std::int32_t discrete = 0, std::int32_t value120 = 0, bool stop = false,
                      std::uint32_t relative_direction = 0);
   void keyboard_key(std::uint32_t time, std::uint32_t key, std::uint32_t state);
+  void keyboard_key_from_source(std::uint64_t source, std::uint32_t time,
+                                std::uint32_t key, std::uint32_t state);
+  void release_keyboard_source(std::uint64_t source);
+  void touch_down(std::uint32_t time, std::int32_t id, std::int32_t x, std::int32_t y);
+  void touch_motion(std::uint32_t time, std::int32_t id, std::int32_t x, std::int32_t y);
+  void touch_up(std::uint32_t time, std::int32_t id);
+  void touch_frame();
+  void touch_cancel();
   void keyboard_modifiers(std::uint32_t depressed, std::uint32_t latched,
                            std::uint32_t locked, std::uint32_t group);
   void keyboard_repeat_info(std::int32_t rate, std::int32_t delay);

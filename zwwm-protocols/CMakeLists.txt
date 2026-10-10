@@ -1,3 +1,5 @@
+include(GNUInstallDirs)
+
 set(ZWWW_PROTOCOL_XML_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/protocols/upstream/wayland-protocols")
 set(ZWWW_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -76,7 +78,12 @@ zwwm_add_project_protocol(zwwm-tags-unstable-v1 protocols/zwwm-tags-unstable-v1.
 zwwm_add_project_protocol(zwwm-data-control-v1 protocols/zwwm-data-control-v1.xml)
 zwwm_add_project_protocol(wlr-data-control-unstable-v1 protocols/wlr-data-control-unstable-v1.xml)
 zwwm_add_project_protocol(zwwm-layer-shell-v1 protocols/zwwm-layer-shell-v1.xml)
-zwwm_add_project_protocol(server-decoration protocols/server-decoration.xml)
+zwwm_add_project_protocol(zwwm-decoration-manager-v1 protocols/zwwm-decoration-manager-v1.xml)
+zwwm_add_project_protocol(zwwm-virtual-keyboard-v1 protocols/zwwm-virtual-keyboard-v1.xml)
+install(FILES protocols/zwwm-virtual-keyboard-v1.xml
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/zwwm/protocols")
+install(FILES protocols/zwwm-decoration-manager-v1.xml
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/zwwm/protocols")
 zwwm_add_project_protocol(xwlr-layer-shell-v1 protocols/xwlr-layer-shell-v1.xml)
 zwwm_add_project_protocol(zwwm-screencopy-view-unstable-v1 protocols/zwwm-screencopy-view-unstable-v1.xml)
 zwwm_add_project_protocol(ext-zwwm-toplevels-unstable-v1 protocols/ext-zwwm-toplevels-unstable-v1.xml)

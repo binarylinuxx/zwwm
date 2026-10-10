@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <protocol name="zwwm_data_control_v1">
-  <copyright>Copyright 2026 zwwm contributors. SPDX-License-Identifier: MIT</copyright>
+  <copyright>Copyright 2026 binarylinuxx. SPDX-License-Identifier: MIT</copyright>
   <interface name="zwwm_data_control_manager_v1" version="1">
     <description summary="privileged zwwm clipboard control">Provides clipboard access without pointer or keyboard focus.</description>
     <request name="create_source"><arg name="id" type="new_id" interface="zwwm_data_control_source_v1"/></request>

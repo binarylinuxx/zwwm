@@ -60,6 +60,17 @@ class NestedBackend {
   struct SeatObserver;
   struct PointerObserver;
   struct KeyboardObserver;
+  struct TouchObserver {
+    NestedBackend* backend;
+    void down(zwayland::client::Proxy&, std::uint32_t, std::uint32_t,
+              zwayland::client::Proxy*, std::int32_t, double, double) const;
+    void up(zwayland::client::Proxy&, std::uint32_t, std::uint32_t, std::int32_t) const;
+    void motion(zwayland::client::Proxy&, std::uint32_t, std::int32_t, double, double) const;
+    void frame(zwayland::client::Proxy&) const;
+    void cancel(zwayland::client::Proxy&) const;
+    void shape(zwayland::client::Proxy&, std::int32_t, double, double) const;
+    void orientation(zwayland::client::Proxy&, std::int32_t, double) const;
+  };
 
   [[nodiscard]] bool create_surface();
   [[nodiscard]] bool create_buffer();
@@ -74,6 +85,7 @@ class NestedBackend {
   [[nodiscard]] bool request_parent_frame();
   void publish_dmabuf_importer();
   void deliver_pointer_motion(std::uint32_t time, std::int32_t x, std::int32_t y);
+  void deliver_touch_motion(std::uint32_t time, std::int32_t id, double x, double y, bool down);
 
   zwayland::server::EventLoop* event_loop_ = nullptr;
   std::shared_ptr<const RuntimeConfig> config_;
@@ -87,6 +99,7 @@ class NestedBackend {
   zwayland::client::Proxy* seat_ = nullptr;
   zwayland::client::Proxy* pointer_ = nullptr;
   zwayland::client::Proxy* keyboard_ = nullptr;
+  zwayland::client::Proxy* touch_ = nullptr;
   zwayland::client::Proxy* wm_base_ = nullptr;
   zwayland::client::Proxy* surface_ = nullptr;
   zwayland::client::Proxy* xdg_surface_ = nullptr;

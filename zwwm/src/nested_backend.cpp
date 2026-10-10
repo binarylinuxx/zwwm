@@ -1388,7 +1388,18 @@ void NestedBackend::FrameObserver::done(zwayland::client::Proxy& callback,
 }
 
 void NestedBackend::SeatObserver::capabilities(zwayland::client::Proxy& seat,
-                                                std::uint32_t capabilities) const {
+                                                 std::uint32_t capabilities) const {
+  if ((capabilities & protocol::WL_SEAT_CAPABILITY_TOUCH) != 0 && backend->touch_ == nullptr) {
+    const auto id = protocol::wl_seat_get_touch(*backend->parent_display_, seat.id);
+    backend->touch_ = backend->parent_display_->find_proxy(id);
+    if (backend->touch_ != nullptr)
+      backend->touch_->set_observer(protocol::wl_touch_observer(TouchObserver{backend}));
+  }
+  if ((capabilities & protocol::WL_SEAT_CAPABILITY_TOUCH) == 0 && backend->touch_ != nullptr) {
+    protocol::wl_touch_release(*backend->parent_display_, backend->touch_->id);
+    backend->touch_ = nullptr;
+    if (backend->input_target_ != nullptr) backend->input_target_->touch_cancel();
+  }
   if ((capabilities & protocol::WL_SEAT_CAPABILITY_POINTER) != 0 && backend->pointer_ == nullptr) {
     const auto id = protocol::wl_seat_get_pointer(*backend->parent_display_, seat.id);
     backend->pointer_ = backend->parent_display_->find_proxy(id);
@@ -1695,6 +1706,11 @@ void NestedBackend::release_buffer() {
 }
 
 void NestedBackend::release_wayland_objects() {
+  if (touch_ != nullptr && parent_display_ != nullptr) {
+    protocol::wl_touch_release(*parent_display_, touch_->id);
+    touch_ = nullptr;
+    if (input_target_ != nullptr) input_target_->touch_cancel();
+  }
   release_egl_surface();
   if (frame_callback_ != nullptr) {
     parent_display_->destroy_proxy(frame_callback_->id);
