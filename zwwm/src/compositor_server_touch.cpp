@@ -59,7 +59,7 @@ void deliver_touch_down(SeatState* seat, std::uint32_t time, std::int32_t id,
   auto* top = root(surface);
   const auto output = surface_output(top);
   if (output) observer->active_output = output;
-  if (managed_surface(top) || top->lock_surface != nullptr ||
+  if ((!observer->external_policy && managed_surface(top)) || top->lock_surface != nullptr ||
       (top->layer_surface != nullptr &&
        top->layer_surface->current.keyboard != protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE)) {
     set_keyboard_focus(seat, top);
@@ -115,5 +115,14 @@ void deliver_touch_frame(SeatState* seat) {
 void cancel_touches(SeatState* seat) {
   while (!seat->touch_points.empty()) cancel_client(seat, seat->touch_points.begin()->second.client);
   seat->touch_frame_clients.clear();
+}
+void cancel_touch_surface(SeatState* seat, SurfaceState* surface) {
+  while (true) {
+    const auto point = std::find_if(seat->touch_points.begin(), seat->touch_points.end(), [surface](const auto& item) {
+      return !*item.second.alive || root(item.second.surface) == surface;
+    });
+    if (point == seat->touch_points.end()) break;
+    cancel_client(seat, point->second.client);
+  }
 }
 }  // namespace zwwm::detail

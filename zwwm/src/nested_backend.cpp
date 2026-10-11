@@ -390,20 +390,32 @@ void NestedBackend::set_config(std::shared_ptr<const RuntimeConfig> config) {
   if (renderer_ != nullptr) repaint_gpu(); else repaint();
 }
 bool NestedBackend::rebuild_switch_shaders(std::string* error) {
+  if (!prepare_config_shaders(*config_, error)) return false;
+  commit_config_shaders();
+  return true;
+}
+bool NestedBackend::prepare_config_shaders(const RuntimeConfig& config, std::string* error) {
   if (renderer_ == nullptr || egl_window_ == nullptr || !egl_window_->make_current()) {
     if (error != nullptr) *error = "nested OpenGL renderer is unavailable";
     return false;
   }
   renderer::ShaderSources sources;
-  if (!load_shader_sources(*config_, &sources, error)) return false;
+  if (!load_shader_sources(config, &sources, error)) return false;
   if (!renderer_->renderer.prepare_shaders(sources)) {
     if (error != nullptr) *error = renderer_->renderer.last_error();
     return false;
   }
+  return true;
+}
+void NestedBackend::commit_config_shaders() {
+  if (renderer_ == nullptr || egl_window_ == nullptr || !egl_window_->make_current()) return;
   renderer_->renderer.commit_shaders();
   repaint_pending_ = true;
   repaint_gpu();
-  return true;
+}
+void NestedBackend::discard_config_shaders() {
+  if (renderer_ != nullptr && egl_window_ != nullptr && egl_window_->make_current())
+    renderer_->renderer.discard_shaders();
 }
 void NestedBackend::show_error(std::string message) {
   auto popup = render_error_popup(message);
@@ -883,6 +895,7 @@ void NestedBackend::present(const ShmBufferView& buffer) {
 }
 
 void NestedBackend::repaint_gpu() {
+  if (camera_frame_preparing_ || tag_transition_preparing_) return;
   if (renderer_ == nullptr || egl_window_ == nullptr || frame_pending_) return;
   const std::uint64_t now = monotonic_ms();
   const auto tag = animations_.tag_transition(now);
@@ -964,7 +977,7 @@ void NestedBackend::repaint_gpu() {
     renderer::Rect tag_bounds;
     if (placement != placements.end()) tag_bounds = placement->bounds;
     else continue;
-    const auto tag_root = tag ? transform_tag_root(tag_bounds, logical_width_, *tag, root->tag_outgoing)
+    const auto tag_root = tag ? transform_tag_root(tag_bounds, logical_width_, logical_height_, *tag, root->tag_outgoing)
                                : TagRootSample{tag_bounds, 1.0F};
     tag_bounds = tag_root.bounds;
     const float decoration_scale = animated_decoration_scale(*root, tag_bounds);
@@ -1072,6 +1085,7 @@ void NestedBackend::repaint_gpu() {
 }
 
 void NestedBackend::repaint() {
+  if (camera_frame_preparing_ || tag_transition_preparing_) return;
   if (buffer_data_ == nullptr || !buffer_attached_ || buffer_in_flight_ || frame_pending_ || surface_ == nullptr ||
       !repaint_pending_) {
     return;
@@ -1142,7 +1156,7 @@ void NestedBackend::repaint() {
       continue;
     }
     if (bounds == nullptr) continue;
-    if (tag) { tag_bounds = transform_tag_root(*bounds, logical_width_, *tag, root_it->tag_outgoing).bounds; bounds = &tag_bounds; }
+    if (tag) { tag_bounds = transform_tag_root(*bounds, logical_width_, logical_height_, *tag, root_it->tag_outgoing).bounds; bounds = &tag_bounds; }
     const auto content = animated_content(*root_it, *bounds);
     const int content_x = content.origin.x;
     const int content_y = content.origin.y;
@@ -1199,7 +1213,7 @@ void NestedBackend::repaint() {
       continue;
     }
     if (bounds == nullptr) continue;
-    const auto tag_root = tag ? transform_tag_root(*bounds, logical_width_, *tag, root_it->tag_outgoing)
+    const auto tag_root = tag ? transform_tag_root(*bounds, logical_width_, logical_height_, *tag, root_it->tag_outgoing)
                               : TagRootSample{*bounds, 1.0F};
     tag_bounds = tag_root.bounds;
     bounds = &tag_bounds;

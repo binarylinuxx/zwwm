@@ -7,6 +7,14 @@ even though in 2026 everyone seems to be rewriting everything in Rust.
 > protocols, APIs, behavior, and internal architecture may change without
 > backward compatibility. Use it only if you accept that instability.
 
+> [!WARNING]
+> `.zw` configuration files are scheduled for deprecation after the next three
+> releases in favor of full protocol-based customization. Configuration,
+> window-management policy, and layouts will be supplied by external clients
+> through native zwwm protocols. See the
+> [external window manager guide](zwwm-protocols/README.md#writing-an-external-window-manager)
+> for the protocol-based approach.
+
 ## Features
 
 - Atomic DRM/KMS and nested Wayland backends

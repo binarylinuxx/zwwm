@@ -99,6 +99,7 @@ struct InputConfig {
 };
 
 struct KeyboardConfig {
+  bool operator==(const KeyboardConfig&) const = default;
   std::string rules;
   std::string model;
   std::string layout;
@@ -132,7 +133,7 @@ struct OutputConfig {
 enum class KeyAction : std::uint8_t {
   exec, reload, exit, focus, killactive, killsession, togglefloating, fullscreen, tag, movetotag,
   zoomin, zoomout, movecluster,
-  pan, leftclick, rightclick, middleclick
+  pan, leftclick, rightclick, middleclick, external
 };
 
 struct Keybinding {

@@ -1,5 +1,7 @@
 #include "zwwm/compositor_server.hpp"
 #include "zwwm/manager_protocol.hpp"
+#include "zwwm/window_manager_protocol.hpp"
+#include "zwwm/layout_manager_protocol.hpp"
 #include "zwwm/nested_backend.hpp"
 #include "zwwm/runtime_backend.hpp"
 #include "zwwm/runtime_config.hpp"
@@ -144,10 +146,32 @@ int main(int argc, char** argv) {
       return rebuilt ? std::string{} : error;
     }
     std::string apply_config(std::shared_ptr<const zwwm::RuntimeConfig> config) {
-      compositor->set_config(config);
+      if (!compositor->set_config(config)) return "could not apply keyboard configuration";
       if (runtime != nullptr) runtime->set_config(config);
       else nested->set_config(std::move(config));
       return rebuild_switch_shaders();
+    }
+    std::string apply_protocol_config(std::shared_ptr<const zwwm::RuntimeConfig> config) {
+      std::string error;
+      const bool prepared = runtime != nullptr ? runtime->prepare_config_shaders(*config, &error) :
+                                                nested->prepare_config_shaders(*config, &error);
+      if (!prepared) return error.empty() ? "could not prepare shaders" : error;
+      compositor->config_batch(false);
+      if (!compositor->set_config(config)) {
+        if (runtime != nullptr) runtime->discard_config_shaders();
+        else nested->discard_config_shaders();
+        compositor->config_batch(true);
+        return "could not apply keyboard configuration";
+      }
+      if (runtime != nullptr) {
+        runtime->commit_config_shaders();
+        runtime->set_config(config);
+      } else {
+        nested->commit_config_shaders();
+        nested->set_config(config);
+      }
+      compositor->config_batch(true);
+      return {};
     }
     std::string set_cursor(const std::string& theme, std::uint32_t size) {
       std::string error;
@@ -180,6 +204,8 @@ int main(int argc, char** argv) {
     if (!config_reloader->start()) std::fprintf(stderr, "zwwm: %s\n", config_reloader->last_error().c_str());
   }
   std::unique_ptr<zwwm::ManagerProtocol> manager_protocol;
+  std::unique_ptr<zwwm::WindowManagerProtocol> window_manager_protocol;
+  std::unique_ptr<zwwm::LayoutManagerProtocol> layout_manager_protocol;
   try {
     manager_protocol = std::make_unique<zwwm::ManagerProtocol>(display, &compositor_server,
         [&loaded, &config_targets]() -> std::string {
@@ -215,14 +241,31 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   zwwm::PluginLoader plugins(&compositor_server);
+  window_manager_protocol = std::make_unique<zwwm::WindowManagerProtocol>(display, &compositor_server,
+      [&compositor_server] { return compositor_server.configuration(); },
+      [&config_targets, &loaded](std::shared_ptr<const zwwm::RuntimeConfig> config) {
+        const auto error = config_targets.apply_protocol_config(config);
+        if (error.empty()) loaded.config = std::move(config);
+        return error;
+      });
+  layout_manager_protocol = std::make_unique<zwwm::LayoutManagerProtocol>(display, &compositor_server);
   struct EventTargets {
     std::unique_ptr<zwwm::ManagerProtocol>* manager;
     zwwm::PluginLoader* plugins;
-  } event_targets{&manager_protocol, &plugins};
+    std::unique_ptr<zwwm::WindowManagerProtocol>* window_manager;
+    std::unique_ptr<zwwm::LayoutManagerProtocol>* layout_manager;
+  } event_targets{&manager_protocol, &plugins, &window_manager_protocol, &layout_manager_protocol};
   compositor_server.set_event_observer([](void* data, const char* event) {
     auto* targets = static_cast<EventTargets*>(data);
     if (event == nullptr) return;
     if (*targets->manager != nullptr) (*targets->manager)->emit(event);
+    if (std::string_view(event) == "config" && *targets->window_manager != nullptr)
+      (*targets->window_manager)->config_changed();
+    if (*targets->window_manager != nullptr) (*targets->window_manager)->emit(event);
+    if (*targets->layout_manager != nullptr &&
+        (std::string_view(event) == "window" || std::string_view(event) == "output" ||
+         std::string_view(event) == "tag" || std::string_view(event) == "config"))
+      (*targets->layout_manager)->invalidate();
     targets->plugins->emit(event);
   }, &event_targets);
   plugins.load(loaded.config->plugins, loaded.path);
@@ -297,8 +340,10 @@ int main(int argc, char** argv) {
     config_targets.runtime = &drm_backend;
     drm_backend.set_input_target(&compositor_server);
     drm_backend.set_gesture_observer([](void* data, const ZwwmPluginGesture& gesture) {
-      static_cast<zwwm::PluginLoader*>(data)->gesture(gesture);
-    }, &plugins);
+      auto* targets = static_cast<EventTargets*>(data);
+      targets->plugins->gesture(gesture);
+      if (*targets->window_manager != nullptr) (*targets->window_manager)->gesture(gesture);
+    }, &event_targets);
     if (!drm_backend.start()) {
       std::fprintf(stderr, "zwwm: backend initialization failed: %s\n", drm_backend.last_error().c_str());
       manager_protocol.reset();

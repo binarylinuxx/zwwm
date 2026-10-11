@@ -477,8 +477,13 @@ void RuntimeBackend::set_config(std::shared_ptr<const RuntimeConfig> config) {
   publish_outputs();
 }
 bool RuntimeBackend::rebuild_switch_shaders(std::string* error) {
+  if (!prepare_config_shaders(*config_, error)) return false;
+  commit_config_shaders();
+  return true;
+}
+bool RuntimeBackend::prepare_config_shaders(const RuntimeConfig& config, std::string* error) {
   renderer::ShaderSources sources;
-  if (!load_shader_sources(*config_, &sources, error)) return false;
+  if (!load_shader_sources(config, &sources, error)) return false;
   std::vector<DrmDevice*> prepared;
   for (auto& device : devices_) {
     if (device->renderer == nullptr || device->outputs.empty()) continue;
@@ -503,14 +508,24 @@ bool RuntimeBackend::rebuild_switch_shaders(std::string* error) {
     if (error != nullptr) *error = "no active OpenGL renderer";
     return false;
   }
-  for (auto* device : prepared) {
+  return true;
+}
+void RuntimeBackend::commit_config_shaders() {
+  for (auto& device : devices_) {
+    if (device->renderer == nullptr || device->outputs.empty()) continue;
     auto* output = device->outputs.front().get();
     if (eglMakeCurrent(device->egl_display, output->egl_surface, output->egl_surface,
-                       device->egl_context) == EGL_TRUE)
-      device->renderer->commit_shaders();
+                       device->egl_context) == EGL_TRUE) device->renderer->commit_shaders();
     for (auto& item : device->outputs) repaint(*item);
   }
-  return true;
+}
+void RuntimeBackend::discard_config_shaders() {
+  for (auto& device : devices_) {
+    if (device->renderer == nullptr || device->outputs.empty()) continue;
+    auto* output = device->outputs.front().get();
+    if (eglMakeCurrent(device->egl_display, output->egl_surface, output->egl_surface,
+                       device->egl_context) == EGL_TRUE) device->renderer->discard_shaders();
+  }
 }
 void RuntimeBackend::show_error(std::string message) {
   auto popup = render_error_popup(message);
@@ -1437,6 +1452,7 @@ void RuntimeBackend::dispatch_drm(DrmDevice& device) {
 
 void RuntimeBackend::repaint(DrmOutput& card) {
   if (!active_ || card.retired) return;
+  if (card.camera_frame_preparing || card.tag_transition_preparing) { card.needs_repaint = true; return; }
   auto& device = *card.device;
   const auto& output_config = config_->output_for(card.output.connector);
   if (card.flip_pending) { card.needs_repaint = true; return; }
@@ -1537,7 +1553,7 @@ void RuntimeBackend::repaint(DrmOutput& card) {
     renderer::Rect tag_bounds;
     if (placement != placements.end()) tag_bounds = placement->bounds;
     else continue;
-    const auto tag_root = tag ? transform_tag_root(tag_bounds, card.output.logical_width, *tag, root->tag_outgoing)
+    const auto tag_root = tag ? transform_tag_root(tag_bounds, card.output.logical_width, card.output.logical_height, *tag, root->tag_outgoing)
                                : TagRootSample{tag_bounds, 1.0F};
     tag_bounds = tag_root.bounds;
     const float decoration_scale = animated_decoration_scale(*root, tag_bounds);

@@ -11,6 +11,8 @@
 
 namespace zwwm {
 
+enum class TagTransitionAxis : std::uint8_t { horizontal, vertical };
+
 struct AnimationConfig {
   bool operator==(const AnimationConfig&) const = default;
   bool enabled = false;
@@ -37,6 +39,7 @@ struct AnimationConfig {
   std::uint32_t tag_scale_per_mille = 1000;
   std::uint32_t tag_parallax_per_mille = 1000;
   std::uint32_t tag_fade_per_mille = 0;
+  TagTransitionAxis tag_transition_axis = TagTransitionAxis::horizontal;
 };
 
 struct AnimationTarget {
@@ -63,6 +66,7 @@ struct TagTransitionSample {
   std::uint32_t scale_per_mille = 1000;
   std::uint32_t parallax_per_mille = 1000;
   std::uint32_t fade_per_mille = 0;
+  TagTransitionAxis axis = TagTransitionAxis::horizontal;
 };
 
 struct TagRootSample {
@@ -72,7 +76,8 @@ struct TagRootSample {
 
 // Applies output-wide tag motion to one toplevel root.
 [[nodiscard]] TagRootSample transform_tag_root(renderer::Rect bounds, std::uint32_t output_width,
-                                               const TagTransitionSample& transition, bool outgoing);
+                                                std::uint32_t output_height,
+                                                const TagTransitionSample& transition, bool outgoing);
 
 class AnimationSystem {
  public:

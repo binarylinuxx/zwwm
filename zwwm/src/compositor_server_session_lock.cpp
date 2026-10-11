@@ -38,6 +38,7 @@ void blank_unlocked_scene(SessionLockState* lock) {
                                                         .window_shader = {}, .border_shader = {}});
   }
   scene_batch(observer, true);
+  if (observer->event_callback != nullptr) observer->event_callback(observer->event_data, "session");
 }
 
 void restore_unlocked_scene(SessionLockState* lock) {
@@ -60,13 +61,15 @@ void restore_unlocked_scene(SessionLockState* lock) {
   for (auto* surface : *observer->surfaces)
     if (surface->parent == nullptr && surface->lock_surface == nullptr) notify_surface_tree(surface);
   auto* focus = seat->regular_focus;
-  if (focus != nullptr && std::find(observer->surfaces->begin(), observer->surfaces->end(), focus) == observer->surfaces->end()) {
+  if (focus != nullptr && (std::find(observer->surfaces->begin(), observer->surfaces->end(), focus) == observer->surfaces->end() ||
+                          !focusable_toplevel(observer, focus, nullptr))) {
     seat->regular_focus = nullptr;
     focus = nullptr;
   }
   if (focus != nullptr) set_keyboard_focus(seat, focus);
   observer->restoring_scene = false;
   scene_batch(observer, true);
+  if (observer->event_callback != nullptr) observer->event_callback(observer->event_data, "session");
 }
 
 void lock_surface_destroyed(zwayland::server::Resource* resource) {

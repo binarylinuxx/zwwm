@@ -731,6 +731,12 @@ ValidationResult validate_config(const Config& config, std::span<const Validatio
       ranged_animation("close-duration-ms", 0, 10000);
       ranged_animation("move-duration-ms", 0, 10000);
       ranged_animation("fade-duration-ms", 0, 10000);
+      if (const Value* value = lookup_field(*object, "tag-transition-axis"); value != nullptr) {
+        const auto* axis = std::get_if<std::string>(&value->data);
+        if (axis == nullptr || (*axis != "horizontal" && *axis != "vertical"))
+          validation_error(result.diagnostics, assignment.location,
+                           "animations.tag-transition-axis must be horizontal or vertical");
+      }
       if (const Value* value = lookup_field(*object, "spring"); value != nullptr) {
         const auto* spring = std::get_if<Value::Object>(&value->data);
         if (spring == nullptr) {
@@ -770,11 +776,12 @@ ValidationResult validate_config(const Config& config, std::span<const Validatio
                               "animations.cubic-bezier");
         }
       }
-      constexpr std::array<std::string_view, 19> animation_fields = {
+      constexpr std::array<std::string_view, 20> animation_fields = {
           "enabled", "duration-ms", "open-duration-ms", "close-duration-ms", "move-duration-ms", "fade-duration-ms",
           "tag-duration-ms", "spring", "cubic-bezier", "open-window",
           "resize", "close", "open-scale-per-mille", "close-scale-per-mille", "open-offset-px",
-          "close-offset-px", "tag-scale-per-mille", "tag-parallax-per-mille", "tag-fade-per-mille"};
+          "close-offset-px", "tag-scale-per-mille", "tag-parallax-per-mille", "tag-fade-per-mille",
+          "tag-transition-axis"};
       warn_unknown_fields(*object, animation_fields, result.diagnostics, assignment.location, "animations");
       continue;
     }

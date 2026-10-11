@@ -7,6 +7,9 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <functional>
+#include <span>
+#include "zwwm/layout/master_stack.hpp"
 #include "zwwm/renderer/dmabuf.hpp"
 #include "zwwm/output_capture.hpp"
 #include "zwwm/output.hpp"
@@ -113,6 +116,25 @@ struct ToplevelInfo {
   OutputId output;
 };
 
+struct ManagedWindowInfo {
+  std::uint64_t id = 0;
+  std::uint64_t parent = 0;
+  OutputId output;
+  std::uint32_t tag = 1, state = 0;
+  std::string app_id, title;
+  renderer::Rect bounds;
+  std::int32_t min_width = 0, min_height = 0, max_width = 0, max_height = 0;
+};
+enum class WindowAction : std::uint32_t { focus, close, raise, floating, fullscreen, hidden };
+struct PolicyInput {
+  enum class Kind { motion, button, binding, touch, request } kind;
+  std::uint32_t time = 0, code = 0, state = 0;
+  std::int32_t x = 0, y = 0;
+  std::uint64_t window = 0;
+  std::uint64_t output = 0;
+  std::string name = {};
+};
+
 struct TagInfo {
   OutputId output;
   std::string connector;
@@ -156,7 +178,10 @@ class CompositorServer {
   using PresentationObserver = void (*)(void*);
   using EventObserver = void (*)(void*, const char* event);
   using ExternalActionHandler = bool (*)(void*, const std::string& action,
-                                        const std::string& argument, std::string* error);
+                                         const std::string& argument, std::string* error);
+  using LayoutProvider = std::function<std::vector<layout::Placement>(
+      OutputId, std::uint8_t, renderer::Rect, std::span<const std::uint64_t>)>;
+  using PolicyInputHandler = std::function<void(const PolicyInput&)>;
 
   CompositorServer(zwayland::server::Display* display, std::shared_ptr<const RuntimeConfig> config);
   CompositorServer(zwayland::server::Display* display, std::shared_ptr<const RuntimeConfig> config,
@@ -176,7 +201,18 @@ class CompositorServer {
   void set_external_action_handler(ExternalActionHandler handler, void* data);
   // Keep authenticated portal dialogs above requesting applications.
   void set_portal_client(zwayland::server::Client* client);
-  void set_config(std::shared_ptr<const RuntimeConfig> config);
+  bool set_config(std::shared_ptr<const RuntimeConfig> config);
+  [[nodiscard]] std::shared_ptr<const RuntimeConfig> configuration() const;
+  void config_batch(bool ready);
+  void set_external_policy(bool enabled);
+  void set_policy_input_handler(PolicyInputHandler handler);
+  [[nodiscard]] bool session_locked() const;
+  void set_layout_provider(LayoutProvider provider);
+  void reconfigure_layout(bool animate = true);
+  [[nodiscard]] std::vector<ManagedWindowInfo> managed_windows() const;
+  bool control_window(std::uint64_t id, WindowAction action, bool enabled, std::string* error);
+  bool assign_window(std::uint64_t id, OutputId output, std::uint8_t tag, std::string* error);
+  bool select_tag(OutputId output, std::uint8_t tag, std::string* error);
   // Replaces outputs in connector order and rebuilds their logical layout.
   void set_outputs(std::vector<OutputInfo> outputs);
   [[nodiscard]] std::vector<OutputInfo> outputs() const;

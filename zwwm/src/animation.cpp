@@ -324,22 +324,25 @@ std::optional<TagTransitionSample> AnimationSystem::tag_transition(std::uint64_t
   const float amount = std::clamp(progress(tag_transition_->second, config_.tag_duration_ms, now_ms),
                                   0.0F, 1.0F);
   return TagTransitionSample{tag_transition_->first, amount, config_.tag_scale_per_mille,
-                             config_.tag_parallax_per_mille, config_.tag_fade_per_mille};
+                             config_.tag_parallax_per_mille, config_.tag_fade_per_mille,
+                             config_.tag_transition_axis};
 }
 
 TagRootSample transform_tag_root(renderer::Rect bounds, std::uint32_t output_width,
+                                 std::uint32_t output_height,
                                  const TagTransitionSample& transition, bool outgoing) {
   const double progress = std::clamp(static_cast<double>(transition.progress), 0.0, 1.0);
   const double depth = transition.scale_per_mille / 1000.0;
   const double scale = outgoing ? 1.0 + (depth - 1.0) * progress
                                 : depth + (1.0 - depth) * progress;
   bounds = scaled(bounds, std::max(0.001, scale));
+  const auto extent = transition.axis == TagTransitionAxis::vertical ? output_height : output_width;
   const double travel = outgoing
-                            ? -transition.direction * progress * output_width *
+                            ? -transition.direction * progress * extent *
                                   (transition.parallax_per_mille / 1000.0)
-                            : transition.direction * (1.0 - progress) * output_width;
-  const double x = static_cast<double>(bounds.origin.x) + travel;
-  bounds.origin.x = rounded_coordinate(x);
+                            : transition.direction * (1.0 - progress) * extent;
+  auto& coordinate = transition.axis == TagTransitionAxis::vertical ? bounds.origin.y : bounds.origin.x;
+  coordinate = rounded_coordinate(static_cast<double>(coordinate) + travel);
   const double fade = transition.fade_per_mille / 1000.0;
   const double opacity = outgoing ? 1.0 - fade * progress : 1.0 - fade * (1.0 - progress);
   return {bounds, static_cast<float>(std::clamp(opacity, 0.0, 1.0))};

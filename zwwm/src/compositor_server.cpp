@@ -122,7 +122,10 @@ ProtocolGlobals::~ProtocolGlobals() {
 #ifdef ZWWM_XWAYLAND
 void focus_xwayland_if_needed(SurfaceState* surface) {
   auto* observer = surface == nullptr ? nullptr : surface->observer;
-  if (observer != nullptr && observer->seat != nullptr && observer->seat->keyboard_focus == nullptr)
+  const auto* role = surface == nullptr ? nullptr : surface->xwayland_surface;
+  const bool floating = role != nullptr && role->floating && role->window != nullptr && !role->window->override_redirect;
+  if (observer != nullptr && observer->seat != nullptr && observer->seat->session_lock == nullptr &&
+      (floating || (!observer->external_policy && observer->seat->keyboard_focus == nullptr)))
     set_keyboard_focus(observer->seat, surface);
 }
 #endif
@@ -180,6 +183,7 @@ struct XdgSurfaceState {
   CanvasBounds canvas_bounds;
   bool floating = false;
   bool fullscreen = false;
+  bool hidden = false;
   bool restore_floating = false;
   bool layout_rules_applied = false;
   std::uint32_t background_blur_radius = 0;
@@ -213,6 +217,10 @@ struct DialogState { zwayland::server::Resource* resource = nullptr; XdgSurfaceS
 struct PopupState { zwayland::server::Resource* resource = nullptr; XdgSurfaceState* xdg = nullptr; XdgSurfaceState* parent = nullptr; SurfaceState* layer_parent = nullptr; PositionerState positioner; Rect last_geometry{0, 0, 0, 0}; bool has_geometry = false; bool grabbed = false; bool dismissed = false; };
 std::uint32_t timestamp_ms() { static std::uint32_t last = 0; const auto n = static_cast<std::uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()); return last = n <= last ? last + 1 : n; }
 SurfaceState* root(SurfaceState* s) { while (s != nullptr && s->parent != nullptr) s = s->parent; return s; }
+void emit_policy_input(Observer* observer, const PolicyInput& input) {
+  if (observer->external_policy && observer->policy_input && observer->seat->session_lock == nullptr)
+    observer->policy_input(input);
+}
 bool belongs_to_popup(const SurfaceState* surface) {
   for (auto* item = surface; item != nullptr; item = item->parent)
     if (item->xdg_surface != nullptr && item->xdg_surface->popup != nullptr) return true;
@@ -362,7 +370,7 @@ bool glob_match(std::string_view pattern, std::string_view value) {
 bool visible_xdg(const Observer* observer, const XdgSurfaceState* x) {
   if (observer == nullptr || x == nullptr || !x->mapped) return false;
   auto* output = output_state(const_cast<Observer*>(observer), x->output);
-  return output != nullptr && x->tag == output->active_tag;
+  return output != nullptr && !x->hidden && x->tag == output->active_tag;
 }
 bool focusable_toplevel(const Observer* observer, const SurfaceState* surface,
                         const SurfaceState* excluded = nullptr) {
@@ -371,7 +379,7 @@ bool focusable_toplevel(const Observer* observer, const SurfaceState* surface,
     return visible_xdg(observer, surface->xdg_surface);
 #ifdef ZWWM_XWAYLAND
   if (surface->xwayland_surface != nullptr && surface->xwayland_surface->window != nullptr &&
-      surface->xwayland_surface->window->mapped) {
+      !surface->xwayland_surface->hidden && surface->xwayland_surface->window->mapped) {
     const auto* output = output_state(const_cast<Observer*>(observer), surface->xwayland_surface->output);
     return output != nullptr && surface->xwayland_surface->tag == output->active_tag;
   }
@@ -380,6 +388,22 @@ bool focusable_toplevel(const Observer* observer, const SurfaceState* surface,
 }
 SurfaceState* focus_fallback(Observer* observer, SurfaceState* excluded = nullptr) {
   if (observer == nullptr || observer->seat == nullptr || observer->surfaces == nullptr) return nullptr;
+  if (observer->external_policy) {
+    auto* x = excluded == nullptr ? nullptr : excluded->xdg_surface;
+    auto* parent = x == nullptr || x->transient_parent == nullptr ? nullptr : x->transient_parent->surface;
+    if (focusable_toplevel(observer, parent, excluded)) return parent;
+#ifdef ZWWM_XWAYLAND
+    const auto* role = excluded == nullptr ? nullptr : excluded->xwayland_surface;
+    if (role != nullptr && role->window != nullptr)
+      for (auto* surface : *observer->surfaces) {
+        const auto* candidate = surface->xwayland_surface;
+        if (candidate != nullptr && candidate->window != nullptr &&
+            candidate->window->id == role->window->transient_for && focusable_toplevel(observer, surface, excluded))
+          return surface;
+      }
+#endif
+    return nullptr;
+  }
   if (focusable_toplevel(observer, observer->seat->regular_focus, excluded))
     return observer->seat->regular_focus;
   for (auto it = observer->surfaces->rbegin(); it != observer->surfaces->rend(); ++it)
@@ -395,6 +419,7 @@ Rect output_work(Observer* observer, OutputId id, bool full = false) {
 }
 bool endless_canvas(const Observer* observer) {
   return observer != nullptr && observer->config != nullptr &&
+         !observer->external_layout &&
          observer->config->layout.kind == LayoutConfig::Kind::endless_canvas;
 }
 CanvasViewport* canvas_viewport(Observer* observer, OutputId id, std::uint8_t tag) {
@@ -635,14 +660,18 @@ std::vector<layout::Placement> root_placements(const Observer* observer, const X
   if (observer != nullptr && observer->surfaces != nullptr) {
     for (const auto* surface : *observer->surfaces) {
       const auto* x = surface->xdg_surface;
-      if (x != nullptr && x->toplevel != nullptr && !x->floating &&
-          (!x->fullscreen || !x->restore_floating) && (!output || x->output == output) &&
-          (x == candidate || visible_xdg(observer, x))) roots.push_back(surface->id);
+      if (x != nullptr && x->toplevel != nullptr && !x->hidden &&
+          !x->floating && (!x->fullscreen || !x->restore_floating) &&
+          (!output || x->output == output) &&
+          (x == candidate || visible_xdg(observer, x) ||
+           (observer->external_layout && !x->ever_mapped &&
+            output_state(const_cast<Observer*>(observer), x->output) != nullptr &&
+            x->tag == output_state(const_cast<Observer*>(observer), x->output)->active_tag))) roots.push_back(surface->id);
 #ifdef ZWWM_XWAYLAND
       const auto* xwayland = surface->xwayland_surface;
       const auto* xwayland_output = xwayland == nullptr ? nullptr :
           output_state(const_cast<Observer*>(observer), xwayland->output);
-      if (xwayland != nullptr && xwayland->window != nullptr && xwayland->window->mapped &&
+      if (xwayland != nullptr && !xwayland->hidden && xwayland->window != nullptr && xwayland->window->mapped &&
           !xwayland->floating && (!output || xwayland->output == output) &&
           xwayland_output != nullptr && xwayland->tag == xwayland_output->active_tag)
         roots.push_back(surface->id);
@@ -651,6 +680,9 @@ std::vector<layout::Placement> root_placements(const Observer* observer, const X
   }
   if (area.width < 0) area = {0, 0, observer->output_width, observer->output_height};
   auto* output_state_value = output_state(const_cast<Observer*>(observer), output);
+  if (observer->external_layout && output_state_value != nullptr)
+    return observer->external_layout(output_state_value->info.id, output_state_value->active_tag,
+        {{area.x, area.y}, {static_cast<std::uint32_t>(area.width), static_cast<std::uint32_t>(area.height)}}, roots);
   if (observer->config->layout.kind == LayoutConfig::Kind::focus_fibonacci && output_state_value != nullptr) {
     auto& leaves = output_state_value->fibonacci_leaves[output_state_value->active_tag - 1];
     const auto focused_id = observer->seat == nullptr || root(observer->seat->toplevel_focus) == nullptr ? 0 :
@@ -1039,7 +1071,7 @@ void configure_layout(Observer* observer, XdgSurfaceState* candidate) {
   for (auto* surface : *observer->surfaces) {
     auto* x = surface->xdg_surface;
     if (surface->parent != nullptr || x == nullptr || x->toplevel == nullptr || (!visible_xdg(observer, x) && x != candidate) ||
-        (!x->floating && !x->fullscreen)) continue;
+         (!x->floating && !x->fullscreen)) continue;
     Rect bounds;
     std::uint32_t states = kSuppressClientDecorations |
         (observer->seat != nullptr && observer->seat->toplevel_focus == surface ? kActivatedState : 0U);
@@ -1069,7 +1101,7 @@ void configure_layout(Observer* observer, XdgSurfaceState* candidate) {
   for (auto* surface : *observer->surfaces) {
     auto* role = surface->xwayland_surface;
     if (surface->parent != nullptr || role == nullptr || role->window == nullptr || !role->window->mapped ||
-        (!role->floating && !role->fullscreen)) continue;
+         (!role->floating && !role->fullscreen)) continue;
     auto* role_output = output_state(observer, role->output);
     if (role_output == nullptr || role->tag != role_output->active_tag) continue;
     const Rect work = output_work(observer, role->output, role->fullscreen);
@@ -1145,7 +1177,7 @@ void notify_surface(SurfaceState* s) {
   if (scene_root->xwayland_surface != nullptr) {
     const auto* role = scene_root->xwayland_surface;
     const auto* owner = output_state(s->observer, role->output);
-    if (owner == nullptr || role->tag != owner->active_tag) {
+    if (owner == nullptr || role->hidden || role->tag != owner->active_tag) {
       s->observer->callback(s->observer->data, ShmBufferView{.surface_id = s->id,
           .root_surface_id = scene_root->id, .output = output, .window_shader = {}, .border_shader = {}});
       return;
@@ -1217,7 +1249,7 @@ void notify_surface(SurfaceState* s) {
     auto* xdg_root = scene_root->xdg_surface;
     const bool portal_dialog = xdg_root != nullptr && portal_surface(scene_root);
     view.layer_priority = portal_dialog ? 40 : belongs_to_popup(s) ? 30 : xdg_root != nullptr && xdg_root->fullscreen ? 20 :
-                           xdg_root != nullptr && xdg_root->floating ? 10 : 0;
+                            xdg_root != nullptr && xdg_root->floating ? 10 : 0;
     view.root_order = scene_root->root_order;
     view.tree_order = s->stack_order;
     view.scene_order = root(s)->id;
@@ -1254,6 +1286,7 @@ void notify_surface(SurfaceState* s) {
       (zoom_frame || (canvas_window && !canvas_interaction) ||
        (seat->interactive != nullptr && !canvas_interaction));
   view.track_geometry_animation = view.toplevel && canvas_interaction && !zoom_frame;
+  view.suppress_geometry_animation = view.suppress_geometry_animation || s->observer->external_layout_snap;
   view.camera_motion = s->observer->camera_frame && canvas_window;
   absolute_position(s, &view.x, &view.y);
     if (auto* xdg_root = root(s)->xdg_surface;
@@ -1328,7 +1361,8 @@ void notify_surface(SurfaceState* s) {
        view.window_geometry_width = window->width;
        view.window_geometry_height = window->height;
        view.content_ready = xwayland_content_ready;
-      view.layer_priority = role->floating ? 10 : 0;
+      view.fullscreen = role->fullscreen;
+      view.layer_priority = role->fullscreen ? 20 : role->floating ? 10 : 0;
     }
 #endif
     if (s->xdg_surface != nullptr) {
@@ -1857,7 +1891,10 @@ void surface_commit(zwayland::server::Client*, zwayland::server::Resource* r) {
                      x->popup->layer_parent->layer_surface->mapped));
     }
     if (!was_mapped && x->mapped && x->popup != nullptr && x->popup->grabbed) activate_popup_grab(x->popup);
-    if (x->toplevel != nullptr && x->mapped) apply_window_rules(x);
+    if (x->toplevel != nullptr && x->mapped) {
+      if (!was_mapped) x->layout_rules_applied = false;
+      apply_window_rules(x);
+    }
     if (x->content_ready) {
       const Rect geometry = effective_window_geometry(s);
       x->accepted_width = geometry.width;
@@ -1905,7 +1942,7 @@ void surface_commit(zwayland::server::Client*, zwayland::server::Resource* r) {
     if (!was_mapped && x->mapped && x->accepted_width > 1 && x->accepted_height > 1) {
       auto* parent = x->transient_parent == nullptr ? nullptr : x->transient_parent->surface;
       const bool focus_transient = parent != nullptr && root(seat->keyboard_focus) == root(parent);
-      if (seat->keyboard_focus == nullptr || portal_surface(s) || focus_transient) {
+      if ((!s->observer->external_policy && seat->keyboard_focus == nullptr) || x->floating || portal_surface(s) || focus_transient) {
         auto* old_focus = seat->toplevel_focus;
         set_keyboard_focus(seat, s);
         if (old_focus != nullptr && old_focus != s) notify_surface(old_focus);
@@ -1929,7 +1966,7 @@ void surface_commit(zwayland::server::Client*, zwayland::server::Resource* r) {
       s->layer_surface != nullptr) configure_layout(s->observer);
   if (x != nullptr && x->toplevel != nullptr && !was_mapped && x->mapped && !x->ever_mapped) {
     x->ever_mapped = true;
-    if (x->transient_parent == nullptr && s->parent == nullptr && !portal_surface(s))
+    if (!s->observer->external_policy && x->transient_parent == nullptr && s->parent == nullptr && !portal_surface(s))
       recenter_canvas_on_surface(s->observer, s);
   }
   if (s->observer != nullptr && s->observer->seat != nullptr) {
@@ -2203,6 +2240,8 @@ void set_toplevel_parent(zwayland::server::Client* client, zwayland::server::Res
   if (parent == nullptr) return;
   x->output = parent->output;
   x->tag = parent->tag;
+  if (x->mapped) set_floating(x, true);
+  else x->floating = true;
 }
 void set_fullscreen(XdgSurfaceState* x, OutputId requested, bool enabled) {
   if (x == nullptr || x->surface == nullptr) return;
@@ -2235,13 +2274,39 @@ bool valid_grab_serial(XdgSurfaceState* x, zwayland::server::Client* client, std
   return seat != nullptr && seat->button_client == client && seat->button_serial == serial &&
          seat->pointer_grab != nullptr && root(seat->pointer_grab) == x->surface;
 }
+bool begin_external_tiled_resize(Observer* observer, SurfaceState* surface, OutputId output,
+                                 Rect bounds, std::uint32_t edge, std::uint32_t serial,
+                                 std::uint32_t button = 0) {
+  if (!observer->external_layout || !observer->external_policy || !observer->policy_input ||
+      observer->seat == nullptr || observer->seat->session_lock != nullptr) return false;
+  auto* seat = observer->seat;
+  set_keyboard_focus(seat, surface);
+  seat->interactive = surface;
+  seat->resize_edge = edge;
+  seat->tiled_resize = true;
+  seat->interactive_start = bounds;
+  seat->interactive_output = output;
+  seat->interactive_pointer_x = seat->pointer_x;
+  seat->interactive_pointer_y = seat->pointer_y;
+  if (button != 0) {
+    seat->compositor_interactive = true;
+    seat->interactive_button = button;
+    seat->pointer_grab = surface;
+    seat->pressed_buttons.push_back(button);
+  }
+  emit_policy_input(observer, PolicyInput{.kind = PolicyInput::Kind::request, .time = serial,
+      .code = 4, .state = edge, .window = surface->id, .output = output.value});
+  return true;
+}
 void begin_interactive(XdgSurfaceState* x, zwayland::server::Client* client, std::uint32_t serial, std::uint32_t edge) {
   if (!valid_grab_serial(x, client, serial) || x->fullscreen) return;
   if (edge != protocol::XDG_TOPLEVEL_RESIZE_EDGE_NONE && edge != protocol::XDG_TOPLEVEL_RESIZE_EDGE_TOP &&
       edge != protocol::XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM && edge != protocol::XDG_TOPLEVEL_RESIZE_EDGE_LEFT &&
       edge != protocol::XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT && edge != protocol::XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT &&
       edge != protocol::XDG_TOPLEVEL_RESIZE_EDGE_RIGHT && edge != protocol::XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT &&
-      edge != protocol::XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT) return;
+        edge != protocol::XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT) return;
+  if (!x->floating && edge != protocol::XDG_TOPLEVEL_RESIZE_EDGE_NONE &&
+      begin_external_tiled_resize(x->surface->observer, x->surface, x->output, x->tile_bounds, edge, serial)) return;
   if (endless_canvas(x->surface->observer)) configure_layout(x->surface->observer, x);
   else set_floating(x, true);
   auto* seat = x->surface->observer->seat;
@@ -2298,7 +2363,11 @@ void toplevel_fullscreen(zwayland::server::Client*, zwayland::server::Resource* 
   auto* x = resource->data<XdgSurfaceState>();
   auto* output = output_resource == nullptr || std::strcmp(output_resource->interface->name, "wl_output") != 0 ? nullptr :
       output_resource->data<OutputState>();
-  set_fullscreen(x, output == nullptr || output->retired ? OutputId{} : output->info.id, true);
+  if (x->surface->observer->external_policy) {
+    emit_policy_input(x->surface->observer, PolicyInput{.kind = PolicyInput::Kind::request,
+        .code = 0, .state = 1, .window = x->surface->id,
+        .output = output == nullptr || output->retired ? x->output.value : output->info.id.value});
+  } else set_fullscreen(x, output == nullptr || output->retired ? OutputId{} : output->info.id, true);
 }
 struct XdgToplevelKTopHandler {
   void destroy(zwayland::server::Client& client, zwayland::server::Resource& resource) {
@@ -2329,19 +2398,33 @@ struct XdgToplevelKTopHandler {
     ([](zwayland::server::Client*, zwayland::server::Resource* r, std::int32_t w, std::int32_t h) { auto* x = r->data<XdgSurfaceState>(); if (w >= 0 && h >= 0) { x->pending_min_width = w; x->pending_min_height = h; } })(&client, &resource, width, height);
   }
   void set_maximized(zwayland::server::Client& client, zwayland::server::Resource& resource) {
-    ([](zwayland::server::Client*, zwayland::server::Resource*) {})(&client, &resource);
+    (void)client;
+    auto* x = resource.data<XdgSurfaceState>();
+    emit_policy_input(x->surface->observer, PolicyInput{.kind = PolicyInput::Kind::request,
+        .code = 1, .state = 1, .window = x->surface->id, .output = x->output.value});
   }
   void unset_maximized(zwayland::server::Client& client, zwayland::server::Resource& resource) {
-    ([](zwayland::server::Client*, zwayland::server::Resource*) {})(&client, &resource);
+    (void)client;
+    auto* x = resource.data<XdgSurfaceState>();
+    emit_policy_input(x->surface->observer, PolicyInput{.kind = PolicyInput::Kind::request,
+        .code = 1, .state = 0, .window = x->surface->id, .output = x->output.value});
   }
   void set_fullscreen(zwayland::server::Client& client, zwayland::server::Resource& resource, zwayland::server::Resource* output) {
     (toplevel_fullscreen)(&client, &resource, output);
   }
   void unset_fullscreen(zwayland::server::Client& client, zwayland::server::Resource& resource) {
-    ([](zwayland::server::Client*, zwayland::server::Resource* r) { ::zwwm::detail::set_fullscreen(r->data<XdgSurfaceState>(), {}, false); })(&client, &resource);
+    (void)client;
+    auto* x = resource.data<XdgSurfaceState>();
+    if (x->surface->observer->external_policy)
+      emit_policy_input(x->surface->observer, PolicyInput{.kind = PolicyInput::Kind::request,
+          .code = 0, .state = 0, .window = x->surface->id, .output = x->output.value});
+    else ::zwwm::detail::set_fullscreen(x, {}, false);
   }
   void set_minimized(zwayland::server::Client& client, zwayland::server::Resource& resource) {
-    ([](zwayland::server::Client*, zwayland::server::Resource*) {})(&client, &resource);
+    (void)client;
+    auto* x = resource.data<XdgSurfaceState>();
+    emit_policy_input(x->surface->observer, PolicyInput{.kind = PolicyInput::Kind::request,
+        .code = 2, .state = 1, .window = x->surface->id, .output = x->output.value});
   }
 };
 void dialog_destroyed(zwayland::server::Resource* resource) {
@@ -2437,7 +2520,8 @@ void set_keyboard_focus(SeatState* seat, SurfaceState* next) {
 #endif
       )) seat->regular_focus = root(next);
   if (next == nullptr) return;
-  const auto keys = std::span(seat->pressed_keys);
+  const auto entered_keys = keyboard_enter_keys(*seat);
+  const auto keys = std::span(entered_keys);
   bool entered = false;
   for (auto* resource : seat->keyboards) if (resource->client == new_client) { protocol::wl_keyboard_send_enter(*resource, serial, next->resource, std::as_bytes(keys)); entered = true; }
   if (entered) remember_serial(*seat, new_client, serial);
@@ -2772,9 +2856,42 @@ void CompositorServer::set_portal_client(zwayland::server::Client* client) {
   impl_->observer.portal_pid = -1;
   if (client != nullptr) impl_->observer.portal_pid = client->pid();
 }
-void CompositorServer::set_config(std::shared_ptr<const RuntimeConfig> config) {
-  if (config == nullptr) return;
-  if (!update_xkb(&impl_->seat_state, config->keyboard)) return;
+std::shared_ptr<const RuntimeConfig> CompositorServer::configuration() const { return impl_->config; }
+void CompositorServer::set_external_policy(bool enabled) {
+  impl_->observer.external_policy = enabled;
+  if (!enabled) {
+    impl_->seat_state.external_key_bindings.clear();
+    impl_->seat_state.external_button_bindings.clear();
+  }
+  if (!enabled && impl_->seat_state.session_lock == nullptr && impl_->seat_state.keyboard_focus == nullptr)
+    set_keyboard_focus(&impl_->seat_state, focus_fallback(&impl_->observer));
+  configure_layout(&impl_->observer);
+}
+void CompositorServer::set_policy_input_handler(PolicyInputHandler handler) {
+  impl_->observer.policy_input = std::move(handler);
+}
+bool CompositorServer::session_locked() const { return impl_->seat_state.session_lock != nullptr; }
+void CompositorServer::set_layout_provider(LayoutProvider provider) {
+  end_interactive(&impl_->seat_state);
+  impl_->observer.camera.stop();
+  impl_->observer.external_layout = std::move(provider);
+  configure_layout(&impl_->observer);
+}
+void CompositorServer::reconfigure_layout(bool animate) {
+  impl_->observer.external_layout_snap = !animate;
+  configure_layout(&impl_->observer);
+  impl_->observer.external_layout_snap = false;
+}
+void CompositorServer::config_batch(bool ready) {
+  if (impl_->observer.callback != nullptr)
+    impl_->observer.callback(impl_->observer.data, ShmBufferView{
+        .output = {}, .camera_frame = true, .camera_frame_ready = ready,
+        .window_shader = {}, .border_shader = {}});
+}
+bool CompositorServer::set_config(std::shared_ptr<const RuntimeConfig> config) {
+  if (config == nullptr) return false;
+  const bool keyboard_changed = config->keyboard != impl_->config->keyboard;
+  if (keyboard_changed && !update_xkb(&impl_->seat_state, config->keyboard)) return false;
   impl_->config = std::move(config);
   impl_->observer.config = impl_->config.get();
   impl_->observer.camera.set_config({
@@ -2782,7 +2899,7 @@ void CompositorServer::set_config(std::shared_ptr<const RuntimeConfig> config) {
       .max_zoom = impl_->config->layout.max_zoom_per_mille / 1000.0,
       .zoom_step = 1.1
   });
-  publish_keymap(&impl_->seat_state);
+  if (keyboard_changed) publish_keymap(&impl_->seat_state);
   auto outputs = this->outputs();
   for (auto& output : outputs) {
     const auto& configured = impl_->config->output_for(output.connector);
@@ -2816,6 +2933,7 @@ void CompositorServer::set_config(std::shared_ptr<const RuntimeConfig> config) {
   for (auto* surface : impl_->surfaces) if (surface->xdg_surface != nullptr && surface->xdg_surface->toplevel != nullptr) reconfigure_popups(reconfigure_popups, surface);
   if (impl_->observer.event_callback != nullptr) impl_->observer.event_callback(impl_->observer.event_data, "config");
   if (impl_->observer.event_callback != nullptr) impl_->observer.event_callback(impl_->observer.event_data, "keyboard");
+  return true;
 }
 void CompositorServer::set_output_size(std::uint32_t width, std::uint32_t height, std::uint32_t refresh_millihz) {
   if (width == 0 || height == 0 || width > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || height > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) return;
@@ -3069,7 +3187,7 @@ std::vector<ToplevelInfo> CompositorServer::toplevels() const {
     OutputId output;
     std::string title;
     std::string app_id;
-    bool mapped = xdg != nullptr && xdg->toplevel != nullptr && xdg->mapped;
+    bool mapped = xdg != nullptr && xdg->toplevel != nullptr && xdg->mapped && !xdg->hidden;
     if (mapped) {
       bounds = xdg->tile_bounds;
       output = xdg->output;
@@ -3078,7 +3196,7 @@ std::vector<ToplevelInfo> CompositorServer::toplevels() const {
     }
 #ifdef ZWWM_XWAYLAND
     else if (surface != nullptr && surface->xwayland_surface != nullptr &&
-             surface->xwayland_surface->window != nullptr && surface->xwayland_surface->window->mapped) {
+             !surface->xwayland_surface->hidden && surface->xwayland_surface->window != nullptr && surface->xwayland_surface->window->mapped) {
       const auto* role = surface->xwayland_surface;
       mapped = true;
       bounds = role->tile_bounds;
@@ -3106,6 +3224,149 @@ std::vector<ToplevelInfo> CompositorServer::toplevels() const {
                         physical.size.width, physical.size.height, output});
   }
   return result;
+}
+std::vector<ManagedWindowInfo> CompositorServer::managed_windows() const {
+  std::vector<ManagedWindowInfo> result;
+  for (auto* surface : impl_->surfaces) {
+    if (surface->parent != nullptr) continue;
+    ManagedWindowInfo info;
+    Rect bounds;
+    if (auto* x = surface->xdg_surface; x != nullptr && x->toplevel != nullptr) {
+      info.id = surface->id; info.output = x->output; info.tag = x->tag;
+      info.app_id = x->app_id; info.title = x->title;
+      if (x->transient_parent != nullptr && x->transient_parent->surface != nullptr)
+        info.parent = x->transient_parent->surface->id;
+      bounds = x->floating && !x->fullscreen && x->floating_bounds.width > 0 ? x->floating_bounds : x->tile_bounds;
+      info.state = (x->mapped ? 1U : 0U) | (impl_->seat_state.toplevel_focus == surface ? 2U : 0U) |
+                   (x->floating ? 4U : 0U) | (x->fullscreen ? 8U : 0U) |
+                   (x->dialog != nullptr && x->dialog->modal ? 16U : 0U) | (x->hidden ? 32U : 0U);
+      info.min_width = x->min_width; info.min_height = x->min_height;
+      info.max_width = x->max_width; info.max_height = x->max_height;
+    }
+#ifdef ZWWM_XWAYLAND
+    else if (auto* x = surface->xwayland_surface; x != nullptr && x->window != nullptr) {
+      info.id = surface->id; info.output = x->output; info.tag = x->tag;
+      info.app_id = x->window->app_id; info.title = x->window->title;
+      for (const auto* parent : impl_->surfaces)
+        if (parent->xwayland_surface != nullptr && parent->xwayland_surface->window != nullptr &&
+            parent->xwayland_surface->window->id == x->window->transient_for) info.parent = parent->id;
+      bounds = x->floating && !x->fullscreen && x->floating_bounds.width > 0 ? x->floating_bounds : x->tile_bounds;
+      info.state = (x->window->mapped ? 1U : 0U) | (impl_->seat_state.toplevel_focus == surface ? 2U : 0U) |
+                   (x->floating ? 4U : 0U) | (x->fullscreen ? 8U : 0U) |
+                   (x->window->modal ? 16U : 0U) | (x->hidden ? 32U : 0U);
+      info.min_width = x->window->min_width; info.min_height = x->window->min_height;
+      info.max_width = x->window->max_width; info.max_height = x->window->max_height;
+    }
+#endif
+    else continue;
+    info.bounds = {{bounds.x, bounds.y}, {static_cast<std::uint32_t>(std::max(0, bounds.width)),
+                                        static_cast<std::uint32_t>(std::max(0, bounds.height))}};
+    result.push_back(std::move(info));
+  }
+  return result;
+}
+
+bool CompositorServer::control_window(std::uint64_t id, WindowAction action, bool enabled, std::string* error) {
+  const auto fail = [error](const char* message) { if (error != nullptr) *error = message; return false; };
+  if (impl_->seat_state.session_lock != nullptr) return fail("session is locked");
+  if (id == 0 && action == WindowAction::focus) {
+    set_keyboard_focus(&impl_->seat_state, nullptr);
+    impl_->seat_state.regular_focus = nullptr;
+    configure_layout(&impl_->observer);
+    if (impl_->observer.event_callback) impl_->observer.event_callback(impl_->observer.event_data, "window");
+    return true;
+  }
+  const auto found = std::find_if(impl_->surfaces.begin(), impl_->surfaces.end(), [id](const auto* surface) {
+    return surface->id == id && surface->parent == nullptr && managed_surface(surface);
+  });
+  if (found == impl_->surfaces.end()) return fail("unknown window");
+  auto* surface = *found;
+  if (action == WindowAction::focus) {
+    const auto info = managed_windows();
+    const auto window = std::find_if(info.begin(), info.end(), [id](const auto& item) { return item.id == id; });
+    if (window == info.end() || (window->state & 1U) == 0 || (window->state & 32U) != 0) return fail("window is not mapped or is hidden");
+    impl_->active_output = impl_->observer.active_output = window->output;
+    switch_active_tag(&impl_->observer, window->output, static_cast<std::uint8_t>(window->tag));
+    set_keyboard_focus(&impl_->seat_state, surface);
+    raise_root(surface);
+  } else if (action == WindowAction::raise) raise_root(surface);
+  else if (auto* x = surface->xdg_surface; x != nullptr && x->toplevel != nullptr) {
+    if (action == WindowAction::close) protocol::xdg_toplevel_send_close(*x->toplevel);
+    else if (action == WindowAction::floating) {
+      if (x->fullscreen) return fail("exit fullscreen before changing floating state");
+      set_floating(x, enabled);
+    } else if (action == WindowAction::fullscreen) {
+      auto* output = output_state(&impl_->observer, x->output);
+      if (output == nullptr) return fail("window has no output");
+      if (enabled && output != nullptr && output->fullscreen != nullptr && output->fullscreen != surface)
+        return fail("output already has a fullscreen window");
+      set_fullscreen(x, {}, enabled);
+    } else if (action == WindowAction::hidden) {
+      if (enabled && x->fullscreen) set_fullscreen(x, {}, false);
+      x->hidden = enabled;
+    } else return fail("invalid window action");
+  }
+#ifdef ZWWM_XWAYLAND
+  else if (auto* x = surface->xwayland_surface; x != nullptr && x->window != nullptr) {
+    if (action == WindowAction::close) x->runtime->close_window(x->window);
+    else if (action == WindowAction::floating) {
+      if (x->fullscreen) return fail("exit fullscreen before changing floating state");
+      set_xwayland_floating(x, enabled);
+    } else if (action == WindowAction::fullscreen) x->fullscreen = enabled;
+    else if (action == WindowAction::hidden) { if (enabled) x->fullscreen = false; x->hidden = enabled; }
+    else return fail("invalid window action");
+    x->runtime->publish_state(x);
+  }
+#endif
+  else return fail("unknown window role");
+  if (action == WindowAction::hidden && enabled) {
+    if (root(impl_->seat_state.keyboard_focus) == surface)
+      set_keyboard_focus(&impl_->seat_state, focus_fallback(&impl_->observer, surface));
+    if (root(impl_->seat_state.pointer_focus) == surface) pointer_leave();
+    cancel_touch_surface(&impl_->seat_state, surface);
+    if (impl_->seat_state.regular_focus == surface) impl_->seat_state.regular_focus = nullptr;
+  }
+  configure_layout(&impl_->observer);
+  notify_surface_tree(surface);
+  return true;
+}
+
+bool CompositorServer::assign_window(std::uint64_t id, OutputId output, std::uint8_t tag, std::string* error) {
+  const auto fail = [error](const char* message) { if (error != nullptr) *error = message; return false; };
+  if (impl_->seat_state.session_lock != nullptr) return fail("session is locked");
+  if (tag < 1 || tag > 9 || output_state(&impl_->observer, output) == nullptr) return fail("invalid output or tag");
+  auto found = std::find_if(impl_->surfaces.begin(), impl_->surfaces.end(), [id](const auto* item) { return item->id == id; });
+  if (found == impl_->surfaces.end()) return fail("unknown window");
+  auto* surface = *found;
+  if (auto* x = surface->xdg_surface; x != nullptr && x->toplevel != nullptr) {
+    if (x->fullscreen) return fail("exit fullscreen before reassigning a window");
+    x->output = output; x->tag = tag;
+  }
+#ifdef ZWWM_XWAYLAND
+  else if (auto* x = surface->xwayland_surface; x != nullptr && x->window != nullptr) {
+    if (x->fullscreen) return fail("exit fullscreen before reassigning a window");
+    x->output = output; x->tag = tag;
+  }
+#endif
+  else return fail("unknown window role");
+  if (impl_->seat_state.toplevel_focus == surface &&
+      (output != impl_->active_output || output_state(&impl_->observer, output)->active_tag != tag))
+    set_keyboard_focus(&impl_->seat_state, focus_fallback(&impl_->observer, surface));
+  if (impl_->seat_state.regular_focus == surface &&
+      (output != impl_->active_output || output_state(&impl_->observer, output)->active_tag != tag))
+    impl_->seat_state.regular_focus = nullptr;
+  configure_layout(&impl_->observer);
+  notify_surface_tree(surface);
+  return true;
+}
+
+bool CompositorServer::select_tag(OutputId output, std::uint8_t tag, std::string* error) {
+  if (impl_->seat_state.session_lock != nullptr || tag < 1 || tag > 9 || output_state(&impl_->observer, output) == nullptr) {
+    if (error != nullptr) *error = "invalid output/tag or locked session";
+    return false;
+  }
+  switch_active_tag(&impl_->observer, output, tag);
+  return true;
 }
 
 std::vector<TagInfo> CompositorServer::tags() const {
@@ -3612,15 +3873,16 @@ SurfaceState* surface_at_global(const Observer* observer, std::int32_t x, std::i
       bool floating = mapped && xdg->floating && !fullscreen;
 #ifdef ZWWM_XWAYLAND
       auto* xwayland = surface->xwayland_surface;
-      if (!mapped && xwayland != nullptr && xwayland->window != nullptr && xwayland->window->mapped) {
+      if (!mapped && xwayland != nullptr && !xwayland->hidden && xwayland->window != nullptr && xwayland->window->mapped) {
         const auto* assigned_output = output_state(const_cast<Observer*>(observer), xwayland->output);
         mapped = assigned_output != nullptr && xwayland->tag == assigned_output->active_tag;
         fullscreen = mapped && xwayland->fullscreen;
         floating = mapped && xwayland->floating && !fullscreen;
       }
 #endif
-       if (surface->parent != nullptr || !mapped || (category == 2) != fullscreen ||
-           (category == 1) != floating || (category == 0) != (!floating && !fullscreen)) continue;
+       if (surface->parent != nullptr || !mapped) continue;
+       if ((category == 2) != fullscreen || (category == 1) != floating ||
+                (category == 0) != (!floating && !fullscreen)) continue;
       if (surface->root_order < highest_order) continue;
       if (auto* hit = surface_tree_at(surface, x, y); hit != nullptr) {
         result = hit;
@@ -3700,6 +3962,7 @@ void route_pointer_motion(SeatState* seat, std::uint32_t time, SurfaceState* hit
   auto* hover_root = root(next);
   auto* hover_observer = hover_root == nullptr ? nullptr : hover_root->observer;
   if (hover_root != nullptr && hover_observer != nullptr && hover_observer->config != nullptr &&
+      !hover_observer->external_policy &&
       hover_observer->config->input.focus_mode == FocusMode::hover && seat->keyboard_focus != hover_root) {
     auto* current_root = root(seat->keyboard_focus);
     const bool exclusive_active = current_root != nullptr && current_root->layer_surface != nullptr &&
@@ -3763,6 +4026,10 @@ bool CompositorServer::pointer_pan_motion(double dx, double dy) {
 }
 void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x, std::int32_t y) {
   idle_activity(&impl_->seat_state);
+  auto* policy_hit = root(impl_->seat_state.pointer_grab != nullptr ? impl_->seat_state.pointer_grab :
+                          surface_at_global(&impl_->observer, x, y));
+  emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::motion, .time = time,
+      .x = x, .y = y, .window = policy_hit != nullptr && managed_surface(policy_hit) ? policy_hit->id : 0});
   if (!impl_->outputs.empty()) {
     auto contains = [x, y](const auto& output) { const auto& info = output->info; return x >= info.logical_x && y >= info.logical_y && x < info.logical_x + static_cast<std::int32_t>(info.logical_width) && y < info.logical_y + static_cast<std::int32_t>(info.logical_height); };
     auto output = std::find_if(impl_->outputs.begin(), impl_->outputs.end(), contains);
@@ -3870,7 +4137,7 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
           xdg->canvas_bounds.height = bounds.height;
         }
         configure_layout(&impl_->observer, xdg);
-      } else if (impl_->seat_state.tiled_resize) {
+      } else if (impl_->seat_state.tiled_resize && !impl_->observer.external_layout) {
         auto* output = output_state(&impl_->observer, impl_->seat_state.interactive_output);
         const auto work = output_work(&impl_->observer, impl_->seat_state.interactive_output);
         if (output == nullptr || work.width <= 0 || work.height <= 0) end_interactive(&impl_->seat_state);
@@ -3889,7 +4156,7 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
           output->tile_weights[impl_->seat_state.weight_after] = impl_->seat_state.interactive_value_after - adjusted;
           configure_layout(&impl_->observer);
         }
-      } else {
+      } else if (!impl_->seat_state.tiled_resize) {
       Rect bounds = impl_->seat_state.interactive_start;
       const auto edge = impl_->seat_state.resize_edge;
       if (edge == protocol::XDG_TOPLEVEL_RESIZE_EDGE_NONE) { bounds.x += dx; bounds.y += dy; }
@@ -3954,6 +4221,32 @@ void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x,
       }
       configure_layout(&impl_->observer);
     }
+    else if (auto* role = impl_->seat_state.interactive->xwayland_surface;
+             role != nullptr && !impl_->seat_state.tiled_resize && role->floating && role->window != nullptr && !role->fullscreen) {
+      Rect bounds = impl_->seat_state.interactive_start;
+      const auto dx = x - impl_->seat_state.interactive_pointer_x;
+      const auto dy = y - impl_->seat_state.interactive_pointer_y;
+      const auto edge = impl_->seat_state.resize_edge;
+      const auto right = bounds.x + bounds.width, bottom = bounds.y + bounds.height;
+      if (edge == protocol::XDG_TOPLEVEL_RESIZE_EDGE_NONE) { bounds.x += dx; bounds.y += dy; }
+      else {
+        if ((edge & protocol::XDG_TOPLEVEL_RESIZE_EDGE_LEFT) != 0) bounds.width -= dx;
+        if ((edge & protocol::XDG_TOPLEVEL_RESIZE_EDGE_RIGHT) != 0) bounds.width += dx;
+        if ((edge & protocol::XDG_TOPLEVEL_RESIZE_EDGE_TOP) != 0) bounds.height -= dy;
+        if ((edge & protocol::XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM) != 0) bounds.height += dy;
+        const auto* window = role->window;
+        bounds.width = std::clamp(bounds.width, std::max(1, window->min_width),
+            std::max(std::max(1, window->min_width), window->max_width > 0 ? window->max_width : 32768));
+        bounds.height = std::clamp(bounds.height, std::max(1, window->min_height),
+            std::max(std::max(1, window->min_height), window->max_height > 0 ? window->max_height : 32768));
+      }
+      const auto work = output_work(&impl_->observer, role->output);
+      bounds = clamp_window(bounds, work);
+      if ((edge & protocol::XDG_TOPLEVEL_RESIZE_EDGE_LEFT) != 0) bounds.x = right - bounds.width;
+      if ((edge & protocol::XDG_TOPLEVEL_RESIZE_EDGE_TOP) != 0) bounds.y = bottom - bounds.height;
+      role->floating_bounds = position_window(bounds, work);
+      configure_layout(&impl_->observer);
+    }
 #endif
   }
   auto* hit = surface_at_global(&impl_->observer, x, y);
@@ -3998,14 +4291,41 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
   auto& seat = impl_->seat_state;
   if (state != protocol::WL_POINTER_BUTTON_STATE_PRESSED && state != protocol::WL_POINTER_BUTTON_STATE_RELEASED) return;
   idle_activity(&seat);
-  if (state == protocol::WL_POINTER_BUTTON_STATE_PRESSED) {
+  auto* policy_hit = root(seat.hit_target);
+  emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::button, .time = time,
+      .code = button, .state = state,
+      .window = policy_hit != nullptr && managed_surface(policy_hit) ? policy_hit->id : 0});
+  if (state == protocol::WL_POINTER_BUTTON_STATE_RELEASED &&
+      std::find(seat.consumed_buttons.begin(), seat.consumed_buttons.end(), button) != seat.consumed_buttons.end()) {
+    if (const auto binding = seat.external_button_bindings.find(button); binding != seat.external_button_bindings.end()) {
+      emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::binding, .time = time,
+          .code = button, .state = state, .name = binding->second});
+      seat.external_button_bindings.erase(binding);
+    }
+    std::erase(seat.consumed_buttons, button);
+    std::erase(seat.pressed_buttons, button);
+    return;
+  }
+  if (state == protocol::WL_POINTER_BUTTON_STATE_PRESSED && seat.session_lock == nullptr &&
+      !seat.compositor_interactive && seat.drag_origin == nullptr &&
+      std::find(seat.pressed_buttons.begin(), seat.pressed_buttons.end(), button) == seat.pressed_buttons.end()) {
     for (const auto& binding : impl_->config->keybindings) {
       if (binding.action != KeyAction::pan && binding.action != KeyAction::leftclick &&
-          binding.action != KeyAction::rightclick && binding.action != KeyAction::middleclick)
+          binding.action != KeyAction::rightclick && binding.action != KeyAction::middleclick &&
+          binding.action != KeyAction::external)
         continue;
       if (!binding_matches_button(binding, button)) continue;
       if (!binding_modifiers_match(binding, seat)) continue;
       const auto& argument = binding.argument;
+      if (binding.action == KeyAction::external) {
+        if (!impl_->observer.external_policy) continue;
+        seat.pressed_buttons.push_back(button);
+        seat.consumed_buttons.push_back(button);
+        seat.external_button_bindings[button] = argument;
+        emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::binding, .time = time,
+            .code = button, .state = state, .name = argument});
+        return;
+      }
       if (binding.action == KeyAction::pan) {
         auto* output = output_state(&impl_->observer, impl_->active_output);
         if (output != nullptr) {
@@ -4117,7 +4437,7 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
         || (xwayland != nullptr && xwayland->floating)
 #endif
         ;
-    if (managed && (floating || endless_canvas(&impl_->observer))) raise_root(target_root);
+    if (managed && (floating || (!impl_->observer.external_policy && endless_canvas(&impl_->observer)))) raise_root(target_root);
   }
   const bool background = target == nullptr || (target_root != nullptr && target_root->layer_surface != nullptr &&
       target_root->layer_surface->current.layer == protocol::ZWWM_LAYER_SHELL_V1_LAYER_BACKGROUND);
@@ -4161,7 +4481,13 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
 #ifdef ZWWM_XWAYLAND
     auto* xwayland = top == nullptr ? nullptr : top->xwayland_surface;
     if (xdg == nullptr && xwayland != nullptr && xwayland->window != nullptr && xwayland->window->mapped &&
-        !xwayland->fullscreen && endless_canvas(&impl_->observer)) {
+        !xwayland->fullscreen && (endless_canvas(&impl_->observer) || impl_->observer.external_layout || xwayland->floating)) {
+      if (button == BTN_RIGHT && !xwayland->floating) {
+        const auto edge = seat.pointer_x < xwayland->tile_bounds.x + xwayland->tile_bounds.width / 2
+            ? protocol::XDG_TOPLEVEL_RESIZE_EDGE_LEFT : protocol::XDG_TOPLEVEL_RESIZE_EDGE_RIGHT;
+        if (begin_external_tiled_resize(&impl_->observer, top, xwayland->output, xwayland->tile_bounds, edge, 0, button)) return;
+      }
+      if (!endless_canvas(&impl_->observer)) set_xwayland_floating(xwayland, true);
       if (seat.keyboard_focus != top) set_keyboard_focus(&seat, top);
       configure_layout(&impl_->observer);
       seat.compositor_interactive = true;
@@ -4188,6 +4514,12 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
     }
 #endif
     if (xdg != nullptr && xdg->toplevel != nullptr && xdg->mapped && !xdg->fullscreen) {
+      if (button == BTN_RIGHT && !xdg->floating) {
+        const auto edge = seat.pointer_x < xdg->tile_bounds.x + xdg->tile_bounds.width / 2
+            ? protocol::XDG_TOPLEVEL_RESIZE_EDGE_LEFT : protocol::XDG_TOPLEVEL_RESIZE_EDGE_RIGHT;
+        if (begin_external_tiled_resize(&impl_->observer, top, xdg->output, xdg->tile_bounds, edge, 0, button)) return;
+      }
+      if (impl_->observer.external_layout) set_floating(xdg, true);
       if (seat.keyboard_focus != top) set_keyboard_focus(&seat, top);
       seat.compositor_interactive = true;
       seat.interactive_button = button;
@@ -4290,7 +4622,7 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
         current_root->layer_surface->current.layer >= protocol::ZWWM_LAYER_SHELL_V1_LAYER_TOP;
     if (keyboard_allowed && (!exclusive_active || current_root == toplevel) && seat.keyboard_focus != toplevel) {
       SurfaceState* old_focus = seat.toplevel_focus;
-      set_keyboard_focus(&seat, toplevel);
+      if (!impl_->observer.external_policy) set_keyboard_focus(&seat, toplevel);
       configure_layout(&impl_->observer);
       if (old_focus != nullptr) notify_surface(old_focus);
       notify_surface(toplevel);
@@ -4352,19 +4684,29 @@ void CompositorServer::keyboard_key(std::uint32_t time, std::uint32_t key, std::
   keyboard_key_from_source(0, time, key, state);
 }
 void CompositorServer::touch_down(std::uint32_t time, std::int32_t id, std::int32_t x, std::int32_t y) {
+  emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::touch, .time = time,
+      .code = static_cast<std::uint32_t>(id), .state = 1, .x = x, .y = y});
   const auto previous = impl_->active_output;
   deliver_touch_down(&impl_->seat_state, time, id, x, y);
   impl_->active_output = impl_->observer.active_output;
   if (previous != impl_->active_output) notify_active_tags(&impl_->observer);
 }
 void CompositorServer::touch_motion(std::uint32_t time, std::int32_t id, std::int32_t x, std::int32_t y) {
+  emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::touch, .time = time,
+      .code = static_cast<std::uint32_t>(id), .state = 2, .x = x, .y = y});
   deliver_touch_motion(&impl_->seat_state, time, id, x, y);
 }
 void CompositorServer::touch_up(std::uint32_t time, std::int32_t id) {
+  emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::touch, .time = time,
+      .code = static_cast<std::uint32_t>(id), .state = 0});
   deliver_touch_up(&impl_->seat_state, time, id);
 }
 void CompositorServer::touch_frame() { deliver_touch_frame(&impl_->seat_state); }
-void CompositorServer::touch_cancel() { cancel_touches(&impl_->seat_state); }
+void CompositorServer::touch_cancel() {
+  emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::touch, .time = timestamp_ms(),
+      .code = static_cast<std::uint32_t>(-1), .state = 3});
+  cancel_touches(&impl_->seat_state);
+}
 void CompositorServer::release_keyboard_source(std::uint64_t source) {
   auto& seat = impl_->seat_state;
   const auto found = seat.keyboard_sources.find(source);
@@ -4408,6 +4750,15 @@ void CompositorServer::keyboard_key_from_source(std::uint64_t source, std::uint3
   if (state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED && seat.session_lock == nullptr) {
     for (const auto& binding : impl_->config->keybindings) {
       if (!binding_matches(binding, seat, key)) continue;
+      if (binding.action == KeyAction::external && !impl_->observer.external_policy) continue;
+      seat.consumed_keys.push_back(key);
+      if (binding.action == KeyAction::external) {
+        seat.external_key_bindings[key] = binding.argument;
+        emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::binding, .time = time,
+            .code = key, .state = state, .name = binding.argument});
+        send_modifiers(seat);
+        return;
+      }
       auto* focused = seat.toplevel_focus;
       auto* xdg = focused == nullptr ? nullptr : focused->xdg_surface;
 #ifdef ZWWM_XWAYLAND
@@ -4478,6 +4829,17 @@ void CompositorServer::keyboard_key_from_source(std::uint64_t source, std::uint3
       return;
     }
   }
+  if (state == protocol::WL_KEYBOARD_KEY_STATE_RELEASED &&
+      std::find(seat.consumed_keys.begin(), seat.consumed_keys.end(), key) != seat.consumed_keys.end()) {
+    if (const auto binding = seat.external_key_bindings.find(key); binding != seat.external_key_bindings.end()) {
+      emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::binding, .time = time,
+          .code = key, .state = state, .name = binding->second});
+      seat.external_key_bindings.erase(binding);
+    }
+    std::erase(seat.consumed_keys, key);
+    send_modifiers(seat);
+    return;
+  }
   if (seat.keyboard_focus == nullptr) return;
   const auto serial = seat.display->next_serial();
   auto* client = seat.keyboard_focus->resource->client;
@@ -4501,10 +4863,17 @@ void CompositorServer::keyboard_modifiers(std::uint32_t depressed, std::uint32_t
 void CompositorServer::keyboard_repeat_info(std::int32_t rate, std::int32_t delay) { if (rate < 0 || delay < 0) return; auto& seat = impl_->seat_state; seat.repeat_rate = rate; seat.repeat_delay = delay; for (auto* resource : seat.keyboards) if (resource->version >= 4) protocol::wl_keyboard_send_repeat_info(*resource, rate, delay); }
 void CompositorServer::input_reset(bool preserve_keyboard_focus) {
   auto& seat = impl_->seat_state;
-  cancel_touches(&seat);
+  touch_cancel();
+  for (const auto& [button, name] : seat.external_button_bindings)
+    emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::binding,
+        .time = timestamp_ms(), .code = button, .state = 0, .name = name});
   reset_virtual_keyboards(&seat);
   release_keyboard_source(0);
   seat.keyboard_sources.clear();
+  seat.consumed_keys.clear();
+  seat.consumed_buttons.clear();
+  seat.external_key_bindings.clear();
+  seat.external_button_bindings.clear();
   cancel_drag(&seat);
   end_interactive(&seat);
   seat.pressed_buttons.clear();

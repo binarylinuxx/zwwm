@@ -26,6 +26,15 @@ can recover after the file is fixed.
 
 ## Language Basics
 
+Custom interpreters may use `zwwm-window-manager-v1` to apply typed runtime
+configuration transactions without parsing or generating `config.zw`.
+The protocol controls bindings, rules, input, keyboard, animations, output
+scale/transform, and shaders. Layout algorithms and placement are separate.
+See [the protocol guide](zwwm-protocols/README.md#external-configuration-interpreters).
+Version 2 also supports external window policy ownership and `external` bindings;
+`zwwm-layout-manager-v1` provides independent placement ownership. See
+[writing an external window manager](zwwm-protocols/README.md#writing-an-external-window-manager).
+
 Comments begin with `--`:
 
 ```zw
@@ -309,6 +318,7 @@ animations = {
   tag-scale-per-mille = 1000
   tag-parallax-per-mille = 1000
   tag-fade-per-mille = 0
+  tag-transition-axis = "horizontal"
 }
 ```
 
@@ -331,6 +341,12 @@ animations = {
 | `tag-scale-per-mille` | `1000` | `500..1000` |
 | `tag-parallax-per-mille` | `1000` | `0..1000` |
 | `tag-fade-per-mille` | `0` | `0..1000` |
+| `tag-transition-axis` | `"horizontal"` | `"horizontal"` or `"vertical"` |
+
+Tag transitions slide along the selected axis, using the output width for
+horizontal travel or its height for vertical travel. Switching to a higher tag
+slides the old scene left/up and brings the new scene from the right/bottom;
+switching to a lower tag reverses that direction.
 
 Cubic Bézier points are per-mille values from `0..1000`. The configured curve
 is applied directly, without an additional spring curve. Legacy `spring`

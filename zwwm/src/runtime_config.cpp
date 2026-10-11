@@ -289,6 +289,7 @@ std::optional<KeyAction> key_action(std::string_view text) {
   if (text == "zoomin") return KeyAction::zoomin;
   if (text == "zoomout") return KeyAction::zoomout;
   if (text == "movecluster") return KeyAction::movecluster;
+  if (text == "external") return KeyAction::external;
   if (text == "pan") return KeyAction::pan;
   if (text == "leftclick") return KeyAction::leftclick;
   if (text == "rightclick") return KeyAction::rightclick;
@@ -886,6 +887,14 @@ RuntimeConfigResult compile_runtime_config(const lang::Config& parsed) {
       ranged("tag-scale-per-mille", mutable_config->animations.tag_scale_per_mille, 500, 1000);
       ranged("tag-parallax-per-mille", mutable_config->animations.tag_parallax_per_mille, 0, 1000);
       ranged("tag-fade-per-mille", mutable_config->animations.tag_fade_per_mille, 0, 1000);
+      if (const auto* value = lang::find_field(*object, "tag-transition-axis")) {
+        const auto* axis = resolved_string(*value, variables);
+        if (axis != nullptr && *axis == "horizontal")
+          mutable_config->animations.tag_transition_axis = TagTransitionAxis::horizontal;
+        else if (axis != nullptr && *axis == "vertical")
+          mutable_config->animations.tag_transition_axis = TagTransitionAxis::vertical;
+        else error(result.diagnostics, item->location, "animations.tag-transition-axis must be horizontal or vertical");
+      }
       if (const auto* spring_value = lang::find_field(*object, "spring"); spring_value != nullptr) {
         const auto* spring = lang::as_object(*spring_value);
         if (spring == nullptr) {

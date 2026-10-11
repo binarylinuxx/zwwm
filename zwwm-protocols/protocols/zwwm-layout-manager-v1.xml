@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="zwwm_layout_manager_v1">
+  <copyright>Copyright 2026 binarylinuxx. SPDX-License-Identifier: BSD-3-Clause</copyright>
+  <interface name="zwwm_layout_manager_v1" version="1">
+    <description summary="external layout ownership">
+      One provider owns tiled placement for all outputs and active tags. Popups,
+      floating dialogs, floating geometry, and interactive move/resize remain
+      compositor-owned. Provider loss restores built-in tiled layouts.
+    </description>
+    <request name="destroy" type="destructor"/>
+    <request name="create_provider"><arg name="id" type="new_id" interface="zwwm_layout_provider_v1"/></request>
+  </interface>
+  <interface name="zwwm_layout_provider_v1" version="1">
+    <description summary="versioned placement batches">
+      Each request identifies output, tag, work area, and participating windows,
+      excluding floating windows and popups. Tiled fullscreen windows retain a slot but display
+      at compositor-controlled fullscreen geometry. Rectangles describe outer
+      frames in global logical coordinates. Commit must place every participant
+      exactly once. New requests invalidate old serials for that output/tag.
+      While waiting, last accepted placements remain visible; new windows use
+      provisional geometry. The compositor never blocks on a layout client.
+    </description>
+    <request name="destroy" type="destructor"/>
+    <request name="request_layout"/>
+    <request name="place">
+      <arg name="serial" type="uint"/><arg name="window_hi" type="uint"/><arg name="window_lo" type="uint"/>
+      <arg name="x" type="int"/><arg name="y" type="int"/><arg name="width" type="uint"/><arg name="height" type="uint"/>
+    </request>
+    <request name="commit">
+      <description summary="apply a complete batch">
+        Animate is 0 for interactive updates and 1 for animated reflows.
+        Failed or stale commits leave the last accepted layout unchanged.
+      </description>
+      <arg name="serial" type="uint"/><arg name="animate" type="uint"/>
+    </request>
+    <event name="request">
+      <arg name="serial" type="uint"/><arg name="output_hi" type="uint"/><arg name="output_lo" type="uint"/><arg name="tag" type="uint"/>
+      <arg name="x" type="int"/><arg name="y" type="int"/><arg name="width" type="uint"/><arg name="height" type="uint"/><arg name="window_count" type="uint"/>
+    </event>
+    <event name="window">
+      <arg name="serial" type="uint"/><arg name="id_hi" type="uint"/><arg name="id_lo" type="uint"/><arg name="state" type="uint"/>
+      <arg name="app_id" type="string"/><arg name="title" type="string"/>
+      <arg name="parent_hi" type="uint"/><arg name="parent_lo" type="uint"/>
+      <arg name="x" type="int"/><arg name="y" type="int"/><arg name="width" type="uint"/><arg name="height" type="uint"/>
+      <arg name="min_width" type="int"/><arg name="min_height" type="int"/><arg name="max_width" type="int"/><arg name="max_height" type="int"/>
+    </event>
+    <event name="done"><arg name="serial" type="uint"/></event>
+    <event name="applied"><arg name="serial" type="uint"/></event>
+    <event name="failed"><arg name="serial" type="uint"/><arg name="message" type="string"/></event>
+  </interface>
+</protocol>

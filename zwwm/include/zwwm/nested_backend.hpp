@@ -40,6 +40,9 @@ class NestedBackend {
   void set_presentation_observer(PresentationObserver observer, void* data);
   void set_config(std::shared_ptr<const RuntimeConfig> config);
   [[nodiscard]] bool rebuild_switch_shaders(std::string* error);
+  bool prepare_config_shaders(const RuntimeConfig& config, std::string* error);
+  void commit_config_shaders();
+  void discard_config_shaders();
   void set_input_target(CompositorServer* compositor);
   // Publishes linux-dmabuf when the presentation context can import it.
   void set_dmabuf_target(CompositorServer* compositor);

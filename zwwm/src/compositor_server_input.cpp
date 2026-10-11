@@ -120,6 +120,13 @@ bool binding_modifiers_match(const Keybinding& binding, const SeatState& seat) {
   }
   return (active & required) == required && (active & physical) == (required & physical);
 }
+std::vector<std::uint32_t> keyboard_enter_keys(const SeatState& seat) {
+  std::vector<std::uint32_t> keys;
+  for (const auto key : seat.pressed_keys)
+    if (std::find(seat.consumed_keys.begin(), seat.consumed_keys.end(), key) == seat.consumed_keys.end())
+      keys.push_back(key);
+  return keys;
+}
 bool binding_matches(const Keybinding& binding, const SeatState& seat, std::uint32_t key) {
   if (!binding_modifiers_match(binding, seat)) return false;
   if (seat.xkb_keymap_handle == nullptr || key > std::numeric_limits<xkb_keycode_t>::max() - 8) return false;
@@ -132,7 +139,8 @@ bool binding_matches(const Keybinding& binding, const SeatState& seat, std::uint
 }
 bool binding_matches_button(const Keybinding& binding, std::uint32_t button) {
   static const std::unordered_map<std::string_view, std::uint32_t> button_map{
-    {"left", 272}, {"right", 273}, {"middle", 274}, {"back", 275}, {"forward", 276}, {"wheel", 272}};
+    {"left", 272}, {"lm", 272}, {"right", 273}, {"rm", 273}, {"middle", 274},
+    {"wheel", 274}, {"wheel-hold", 274}, {"back", 275}, {"forward", 276}};
   const auto it = button_map.find(binding.key);
   if (it == button_map.end()) return false;
   return button == it->second;
@@ -640,8 +648,9 @@ void bind_seat(zwayland::server::Client* c, void* data, std::uint32_t v, std::ui
         if (resource->version >= 4) protocol::wl_keyboard_send_repeat_info(*resource, state->repeat_rate, state->repeat_delay);
         if (state->keyboard_focus == nullptr || state->keyboard_focus->resource->client != client) return;
         const auto serial = state->display->next_serial();
+        const auto keys = keyboard_enter_keys(*state);
         protocol::wl_keyboard_send_enter(*resource, serial, state->keyboard_focus->resource,
-                                         std::as_bytes(std::span(state->pressed_keys)));
+                                         std::as_bytes(std::span(keys)));
         remember_serial(*state, client, serial);
         send_modifiers(*state);
       })(&client, &resource, id);

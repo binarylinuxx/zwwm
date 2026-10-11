@@ -38,6 +38,9 @@ class RuntimeBackend {
   [[nodiscard]] const std::string& last_error() const;
   void set_config(std::shared_ptr<const RuntimeConfig> config);
   [[nodiscard]] bool rebuild_switch_shaders(std::string* error);
+  bool prepare_config_shaders(const RuntimeConfig& config, std::string* error);
+  void commit_config_shaders();
+  void discard_config_shaders();
   void set_input_target(CompositorServer* compositor);
   void set_gesture_observer(GestureObserver observer, void* data);
   void set_dmabuf_target(CompositorServer* compositor);

@@ -107,7 +107,14 @@ void XwaylandRuntime::read_window_properties(XwaylandWindow* item) {
       }
     }
     std::free(state);
-    if (item->surface != nullptr) item->surface->fullscreen = fullscreen;
+    if (item->surface != nullptr) {
+      auto* role = item->surface;
+      if (role->surface != nullptr && role->surface->observer->external_policy) {
+        if (fullscreen != role->fullscreen)
+          emit_policy_input(role->surface->observer, PolicyInput{.kind = PolicyInput::Kind::request,
+              .code = 0, .state = fullscreen ? 1U : 0U, .window = role->surface->id, .output = role->output.value});
+      } else role->fullscreen = fullscreen;
+    }
 
     item->min_width = item->min_height = item->max_width = item->max_height = 0;
     item->base_width = item->base_height = 0;
@@ -451,7 +458,7 @@ void XwaylandRuntime::process_event(xcb_generic_event_t* generic) {
         } else if (event->type == net_active_window && item->surface != nullptr &&
                     item->surface->surface != nullptr) {
           auto* seat = item->surface->surface->observer->seat;
-          if (seat->keyboard_focus == nullptr)
+          if (!item->surface->surface->observer->external_policy && seat->keyboard_focus == nullptr)
             set_keyboard_focus(seat, item->surface->surface);
         } else if (event->type == net_wm_state && item->surface != nullptr && event->format == 32) {
           auto* role = item->surface;
@@ -461,7 +468,12 @@ void XwaylandRuntime::process_event(xcb_generic_event_t* generic) {
             if (event->data.data32[0] == 1) return true;
             return !current;
           };
-          role->fullscreen = update(net_wm_state_fullscreen, role->fullscreen);
+          const bool requested_fullscreen = update(net_wm_state_fullscreen, role->fullscreen);
+          if (role->surface != nullptr && role->surface->observer->external_policy) {
+            if (requested_fullscreen != role->fullscreen)
+              emit_policy_input(role->surface->observer, PolicyInput{.kind = PolicyInput::Kind::request,
+                  .code = 0, .state = requested_fullscreen ? 1U : 0U, .window = role->surface->id, .output = role->output.value});
+          } else role->fullscreen = requested_fullscreen;
           item->modal = update(net_wm_state_modal, item->modal);
           (void)reclassify(item);
           if (event->data.data32[1] == net_wm_state_hidden || event->data.data32[2] == net_wm_state_hidden)

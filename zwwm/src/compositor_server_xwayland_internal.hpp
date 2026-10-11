@@ -56,6 +56,7 @@ struct XwaylandSurfaceState {
   std::optional<bool> floating_override;
   bool floating = false;
   bool fullscreen = false;
+  bool hidden = false;
   bool associated = false;
 };
 struct XwaylandSelection { XwaylandRuntime* runtime = nullptr; xcb_atom_t atom = XCB_ATOM_NONE; xcb_window_t window = XCB_WINDOW_NONE; xcb_window_t owner = XCB_WINDOW_NONE; xcb_timestamp_t timestamp = XCB_CURRENT_TIME; DataSourceState* source = nullptr; bool primary = false; bool notify_on_focus = false; };
