@@ -1,6 +1,7 @@
 #pragma once
 
 #include "zwwm/compositor_server.hpp"
+#include "zwwm/overview.hpp"
 
 #include <zwayland/server/display.hpp>
 #include <wayland-zwayland-server.h>
@@ -98,6 +99,13 @@ struct Observer {
   bool camera_frame = false;
   bool restoring_scene = false;
   bool external_policy = false;
+  bool overview = false;
+  bool overview_visible = false, overview_repainting = false;
+  double overview_first_tag = 0;
+  double overview_progress = 0, overview_scroll = 0;
+  OverviewMotion overview_motion, overview_scroll_motion;
+  zwayland::server::EventLoop* overview_loop = nullptr;
+  int overview_timer = -1;
   CompositorServer::LayoutProvider external_layout;
   bool external_layout_snap = false;
   CompositorServer::PolicyInputHandler policy_input;
@@ -105,6 +113,7 @@ struct Observer {
   OutputId canvas_frame_output;
   OutputId camera_output;
   std::uint8_t camera_tag = 0;
+  ~Observer() { if (overview_loop != nullptr && overview_timer >= 0) overview_loop->remove(overview_timer); }
 };
 
 struct Pool { void* mapping = nullptr; std::size_t size = 0; UniqueFd fd; std::size_t buffers = 0; bool destroyed = false; };
@@ -319,6 +328,8 @@ void notify_surface_tree(SurfaceState* surface);
 void configure_layout(Observer* observer, XdgSurfaceState* candidate = nullptr);
 bool recenter_canvas_on_surface(Observer* observer, SurfaceState* surface);
 void end_interactive(SeatState* seat);
+void update_overview(Observer* observer, bool enabled);
+void stop_overview_animation(Observer* observer);
 void set_pointer_focus(SeatState* seat, SurfaceState* next, std::int32_t x, std::int32_t y);
 void set_keyboard_focus(SeatState* seat, SurfaceState* next);
 OutputId surface_output(const SurfaceState* surface);

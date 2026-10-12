@@ -8,6 +8,31 @@ namespace zwwm::renderer {
 
 bool Rect::empty() const { return size.width == 0 || size.height == 0; }
 
+std::vector<Rect> uncovered_regions(Size target, const std::vector<Rect>& covered) {
+  std::vector<Rect> regions{{{0, 0}, target}};
+  for (const auto& cut : covered) {
+    std::vector<Rect> next;
+    for (const auto& region : regions) {
+      const std::int64_t x = region.origin.x, y = region.origin.y;
+      const auto right = x + region.size.width, bottom = y + region.size.height;
+      const auto left = std::max(x, static_cast<std::int64_t>(cut.origin.x));
+      const auto top = std::max(y, static_cast<std::int64_t>(cut.origin.y));
+      const auto r = std::min(right, static_cast<std::int64_t>(cut.origin.x) + cut.size.width);
+      const auto b = std::min(bottom, static_cast<std::int64_t>(cut.origin.y) + cut.size.height);
+      if (left >= r || top >= b) { next.push_back(region); continue; }
+      const auto add = [&](std::int64_t l, std::int64_t t, std::int64_t w, std::int64_t h) {
+        if (w > 0 && h > 0) next.push_back({{static_cast<std::int32_t>(l), static_cast<std::int32_t>(t)}, {static_cast<unsigned>(w), static_cast<unsigned>(h)}});
+      };
+      add(x, y, region.size.width, top - y);
+      add(x, b, region.size.width, bottom - b);
+      add(x, top, left - x, b - top);
+      add(r, top, right - r, b - top);
+    }
+    regions = std::move(next);
+  }
+  return regions;
+}
+
 bool Rect::intersects(const Rect& other) const {
   if (empty() || other.empty()) {
     return false;

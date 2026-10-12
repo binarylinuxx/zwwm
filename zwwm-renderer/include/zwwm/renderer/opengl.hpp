@@ -29,6 +29,7 @@ struct ShaderSources {
   std::string window;
   std::string border;
   std::string background;
+  std::string overview_backdrop_image;
 };
 
 // Pixel-center geometry shared by ring planning tests and the shader contract.
@@ -81,6 +82,7 @@ struct DrawCall {
   float texture_corner_radius = 0.0F;
   std::optional<Rect> clip_bounds;
   float clip_radius = 0.0F;
+  bool strict_clip = false;
   float background_blur_radius = 0.0F;
   std::uint32_t background_blur_passes = 3;
   float background_blur_brightness = 1.0F;
@@ -116,6 +118,10 @@ struct FramePlan {
   std::vector<DrawCall> draws;
   bool draw_background = false;
   float shader_time = 0.0F;
+  bool overview_backdrop = false;
+  float overview_backdrop_opacity = 1.0F;
+  float overview_backdrop_blur_radius = 0.0F;
+  std::uint32_t overview_backdrop_blur_passes = 3;
 };
 
 class OpenGlRenderer {
@@ -165,6 +171,7 @@ class OpenGlRenderer {
   GLint draw_origin_location_ = -1;
   GLint clip_rect_location_ = -1;
   GLint clip_radius_location_ = -1;
+  GLint strict_clip_location_ = -1;
   GLint has_clip_location_ = -1;
   GLint input_to_clip_row_0_location_ = -1;
   GLint input_to_clip_row_1_location_ = -1;
@@ -191,6 +198,10 @@ class OpenGlRenderer {
   std::uint32_t pending_wallpaper_width_ = 0, pending_wallpaper_height_ = 0;
   GLuint wallpaper_texture_ = 0;
   GLuint pending_wallpaper_texture_ = 0;
+  GLuint overview_backdrop_texture_ = 0, pending_overview_backdrop_texture_ = 0;
+  mutable GLuint overview_scene_background_texture_ = 0;
+  std::uint32_t overview_backdrop_width_ = 0, overview_backdrop_height_ = 0;
+  std::uint32_t pending_overview_backdrop_width_ = 0, pending_overview_backdrop_height_ = 0;
   GLint glass_rect_location_ = -1;
   GLint glass_rect_size_location_ = -1;
   GLint glass_corner_radius_location_ = -1;

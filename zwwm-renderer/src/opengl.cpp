@@ -21,6 +21,7 @@ std::string default_wallpaper_path() {
   for (const auto& path : {
            std::filesystem::path{"/etc/xdg/zwwm/background/background.png"},
            std::filesystem::path{ZWWM_DATA_DIR} / "background/background.png",
+           std::filesystem::path{ZWWM_SOURCE_DATA_DIR} / "background.png",
            std::filesystem::path{"zwwm/data/background.png"}}) {
     std::error_code error;
     if (std::filesystem::is_regular_file(path, error)) return path.string();
@@ -53,6 +54,13 @@ GLuint load_png_texture(const std::string& path, std::string& error,
     return 0;
   }
   image.format = PNG_FORMAT_RGBA;
+  GLint maximum_texture_size = 0;
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximum_texture_size);
+  if (maximum_texture_size > 0 && (image.width > static_cast<unsigned>(maximum_texture_size) || image.height > static_cast<unsigned>(maximum_texture_size))) {
+    png_image_free(&image);
+    error = "background image exceeds the GPU texture size limit";
+    return 0;
+  }
   if (image.width > static_cast<png_uint_32>(std::numeric_limits<GLsizei>::max()) ||
       image.height > static_cast<png_uint_32>(std::numeric_limits<GLsizei>::max())) {
     png_image_free(&image);
@@ -289,6 +297,7 @@ bool OpenGlRenderer::initialize() {
   draw_origin_location_ = glGetUniformLocation(program_, "draw_origin");
   clip_rect_location_ = glGetUniformLocation(program_, "clip_rect");
   clip_radius_location_ = glGetUniformLocation(program_, "clip_radius");
+  strict_clip_location_ = glGetUniformLocation(program_, "strict_clip");
   has_clip_location_ = glGetUniformLocation(program_, "has_clip");
   input_to_clip_row_0_location_ = glGetUniformLocation(program_, "input_to_clip_row_0");
   input_to_clip_row_1_location_ = glGetUniformLocation(program_, "input_to_clip_row_1");
@@ -449,11 +458,18 @@ bool OpenGlRenderer::prepare_shaders(const ShaderSources& sources) {
     discard_shaders();
     return false;
   }
-  pending_wallpaper_texture_ = load_png_texture(default_wallpaper_path(), last_error_,
-                                               &pending_wallpaper_width_, &pending_wallpaper_height_);
-  if (pending_wallpaper_texture_ == 0) {
-    discard_shaders();
-    return false;
+  if (!sources.background.empty()) {
+    pending_wallpaper_texture_ = load_png_texture(default_wallpaper_path(), last_error_,
+                                                 &pending_wallpaper_width_, &pending_wallpaper_height_);
+    if (pending_wallpaper_texture_ == 0) {
+      discard_shaders();
+      return false;
+    }
+  }
+  if (!sources.overview_backdrop_image.empty()) {
+    pending_overview_backdrop_texture_ = load_png_texture(sources.overview_backdrop_image, last_error_,
+        &pending_overview_backdrop_width_, &pending_overview_backdrop_height_);
+    if (pending_overview_backdrop_texture_ == 0) { discard_shaders(); return false; }
   }
   pending_window_shader_ = sources.window;
   pending_border_shader_ = sources.border;
@@ -476,6 +492,10 @@ void OpenGlRenderer::commit_shaders() {
   wallpaper_texture_ = std::exchange(pending_wallpaper_texture_, 0);
   wallpaper_width_ = std::exchange(pending_wallpaper_width_, 0);
   wallpaper_height_ = std::exchange(pending_wallpaper_height_, 0);
+  if (overview_backdrop_texture_ != 0) glDeleteTextures(1, &overview_backdrop_texture_);
+  overview_backdrop_texture_ = std::exchange(pending_overview_backdrop_texture_, 0);
+  overview_backdrop_width_ = std::exchange(pending_overview_backdrop_width_, 0);
+  overview_backdrop_height_ = std::exchange(pending_overview_backdrop_height_, 0);
 }
 
 void OpenGlRenderer::discard_shaders() {
@@ -492,6 +512,9 @@ void OpenGlRenderer::discard_shaders() {
     pending_wallpaper_texture_ = 0;
   }
   pending_wallpaper_width_ = pending_wallpaper_height_ = 0;
+  if (pending_overview_backdrop_texture_ != 0) glDeleteTextures(1, &pending_overview_backdrop_texture_);
+  pending_overview_backdrop_texture_ = 0;
+  pending_overview_backdrop_width_ = pending_overview_backdrop_height_ = 0;
 }
 
 void OpenGlRenderer::shutdown() {
@@ -506,6 +529,11 @@ void OpenGlRenderer::shutdown() {
     wallpaper_texture_ = 0;
   }
   wallpaper_width_ = wallpaper_height_ = 0;
+  if (overview_backdrop_texture_ != 0) glDeleteTextures(1, &overview_backdrop_texture_);
+  overview_backdrop_texture_ = 0;
+  overview_backdrop_width_ = overview_backdrop_height_ = 0;
+  if (overview_scene_background_texture_ != 0) glDeleteTextures(1, &overview_scene_background_texture_);
+  overview_scene_background_texture_ = 0;
   if (!kawase_textures_.empty()) {
     glDeleteTextures(static_cast<GLsizei>(kawase_textures_.size()), kawase_textures_.data());
     kawase_textures_.clear();
@@ -547,6 +575,7 @@ void OpenGlRenderer::shutdown() {
   draw_origin_location_ = -1;
   clip_rect_location_ = -1;
   clip_radius_location_ = -1;
+  strict_clip_location_ = -1;
   has_clip_location_ = -1;
   input_to_clip_row_0_location_ = -1;
   input_to_clip_row_1_location_ = -1;
@@ -721,7 +750,7 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
   glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   glUniform1i(background_texture_location_, 1);
   glUniform2f(target_size_location_, static_cast<float>(target_size.width), static_cast<float>(target_size.height));
-  if (frame.draw_background && wallpaper_texture_ != 0 &&
+  if (frame.draw_background && !background_shader_.empty() && wallpaper_texture_ != 0 &&
       wallpaper_width_ != 0 && wallpaper_height_ != 0) {
     const float output_aspect = static_cast<float>(target_size.width) / target_size.height;
     const float image_aspect = static_cast<float>(wallpaper_width_) / wallpaper_height_;
@@ -782,6 +811,17 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(program_);
   }
+  if (frame.overview_backdrop) {
+    if (overview_scene_background_texture_ == 0) glGenTextures(1, &overview_scene_background_texture_);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, overview_scene_background_texture_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, target_size.width, target_size.height, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
   const auto draw_surface = [&](const RenderDraw& draw, bool background_only) {
     const bool blend = background_only || !draw.opaque || draw.opacity < 1.0F || draw.corner_radius > 0.0F ||
                        draw.border_width > 0.0F || draw.clip_bounds.has_value();
@@ -820,6 +860,7 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
     }
     glUniform2f(draw_origin_location_, static_cast<float>(draw.bounds.origin.x), static_cast<float>(draw.bounds.origin.y));
     glUniform1i(has_clip_location_, draw.clip_bounds.has_value() ? GL_TRUE : GL_FALSE);
+    glUniform1i(strict_clip_location_, draw.strict_clip ? GL_TRUE : GL_FALSE);
     if (draw.clip_bounds.has_value()) {
       glUniform4f(clip_rect_location_, static_cast<float>(draw.clip_bounds->origin.x), static_cast<float>(draw.clip_bounds->origin.y),
                   static_cast<float>(draw.clip_bounds->size.width), static_cast<float>(draw.clip_bounds->size.height));
@@ -841,6 +882,53 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
     }
     glDrawArrays(GL_TRIANGLES, 0, 6);
   };
+  if (frame.overview_backdrop) {
+    std::vector<Rect> scenes;
+    for (const auto& draw : frame.draws) if (draw.shader_role == ShaderRole::background) scenes.push_back(draw.bounds);
+    auto regions = uncovered_regions(target_size, scenes);
+    for (const auto& draw : frame.draws) if (draw.shader_role == ShaderRole::background && draw.corner_radius > 0) {
+      const int radius = static_cast<int>(std::ceil(std::min(draw.corner_radius, 0.5F * std::min(draw.bounds.size.width, draw.bounds.size.height))));
+      for (const int x : {draw.bounds.origin.x, draw.bounds.origin.x + static_cast<int>(draw.bounds.size.width) - radius})
+        for (const int y : {draw.bounds.origin.y, draw.bounds.origin.y + static_cast<int>(draw.bounds.size.height) - radius}) {
+          const int left = std::max(0, x), top = std::max(0, y);
+          const int right = std::min(static_cast<int>(target_size.width), x + radius), bottom = std::min(static_cast<int>(target_size.height), y + radius);
+          if (right > left && bottom > top) regions.push_back({{left, top}, {static_cast<unsigned>(right - left), static_cast<unsigned>(bottom - top)}});
+        }
+    }
+    const bool scissor = glIsEnabled(GL_SCISSOR_TEST);
+    GLint old_scissor[4]; glGetIntegerv(GL_SCISSOR_BOX, old_scissor);
+    const auto outside = [&](const auto& render) {
+      glEnable(GL_SCISSOR_TEST);
+      for (const auto& region : regions) {
+        glScissor(region.origin.x, static_cast<GLint>(target_size.height - region.origin.y - region.size.height), region.size.width, region.size.height);
+        render();
+      }
+      glDisable(GL_SCISSOR_TEST);
+    };
+    DrawCall backdrop(0, {{0, 0}, target_size}, std::clamp(frame.overview_backdrop_opacity, 0.0F, 1.0F), {1, 1, 1, 1}, std::nullopt);
+    if (overview_backdrop_texture_ != 0) {
+      backdrop.texture = overview_backdrop_texture_;
+      const float transition_opacity = backdrop.opacity;
+      backdrop.opacity = 1.0F;
+      const float screen = static_cast<float>(target_size.width) / target_size.height;
+      const float image = static_cast<float>(overview_backdrop_width_) / overview_backdrop_height_;
+      if (screen > image) { const float shown = image / screen; backdrop.source_uv = {0, (1 - shown) / 2, 1, (1 + shown) / 2}; }
+      else { const float shown = screen / image; backdrop.source_uv = {(1 - shown) / 2, 0, (1 + shown) / 2, 1}; }
+      // Blur a complete backdrop image so scene colors cannot leak into the
+      // blur kernel. Scene backgrounds are restored from their sharp snapshot.
+      glDisable(GL_SCISSOR_TEST);
+      draw_surface(RenderDraw(backdrop), false);
+      backdrop.opacity = transition_opacity;
+    }
+    backdrop.texture.reset();
+    backdrop.background_blur_radius = frame.overview_backdrop_blur_radius * backdrop.opacity;
+    backdrop.background_blur_passes = frame.overview_backdrop_blur_passes;
+    glDisable(GL_SCISSOR_TEST);
+    if (!regions.empty() && backdrop.background_blur_radius > 0 && prepare_blur(backdrop))
+      outside([&] { draw_surface(RenderDraw(backdrop), true); });
+    glScissor(old_scissor[0], old_scissor[1], old_scissor[2], old_scissor[3]);
+    if (scissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
+  }
   const auto draw_glass = [&](const RenderDraw& draw) {
     glUseProgram(glass_program_);
     glEnable(GL_BLEND);
@@ -923,11 +1011,14 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
                static_cast<float>(texture_rect.origin.y), static_cast<float>(texture_rect.size.width),
                static_cast<float>(texture_rect.size.height));
     uniform_1f(custom_program, "zwwm_time", draw.shader_time);
+    if (selected.role == ShaderRole::background)
+      uniform_2f(custom_program, "zwwm_output_size", static_cast<float>(draw.bounds.size.width), static_cast<float>(draw.bounds.size.height));
     uniform_1i(custom_program, "zwwm_state", static_cast<GLint>(draw.toplevel_state));
     uniform_1i(custom_program, "zwwm_has_texture", draw.texture.has_value() ? GL_TRUE : GL_FALSE);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, draw.texture.value_or(0));
+    glBindTexture(GL_TEXTURE_2D, selected.role == ShaderRole::background ? wallpaper_texture_ : draw.texture.value_or(0));
     uniform_1i(custom_program, "zwwm_window_texture", 0);
+    uniform_1i(custom_program, "zwwm_background_image", 0);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, blurred_backdrop_ready ? background_texture_ : reflection_texture_);
     uniform_1i(custom_program, "zwwm_blurred_backdrop_texture", 1);
@@ -945,10 +1036,20 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
   bool custom_toplevel_blur_ready = false;
   for (const DrawCall& item : frame.draws) {
     const RenderDraw draw(item);
+    if (frame.overview_backdrop && draw.shader_role == ShaderRole::background && overview_scene_background_texture_ != 0) {
+      DrawCall scene(item);
+      scene.shader_role = ShaderRole::builtin;
+      scene.texture = overview_scene_background_texture_;
+      scene.source_uv = {0, 1, 1, 0};
+      draw_surface(RenderDraw(scene), false);
+      continue;
+    }
     const auto* selected_window = draw.shader_role == ShaderRole::window ?
         custom_program(draw.shader_name, window_shader_, ShaderRole::window) : nullptr;
     const auto* selected_border = draw.shader_role == ShaderRole::border ?
         custom_program(draw.shader_name, border_shader_, ShaderRole::border) : nullptr;
+    const auto* selected_background = draw.shader_role == ShaderRole::background ?
+        custom_program(draw.shader_name, background_shader_, ShaderRole::background) : nullptr;
     const bool custom_window = selected_window != nullptr;
     if (custom_window &&
         draw.toplevel_id != 0 && draw.toplevel_id != backdrop_toplevel) {
@@ -978,6 +1079,8 @@ bool OpenGlRenderer::render(const FramePlan& frame, Size target_size) const {
       draw_custom(draw, *selected_window, blurred_backdrop_ready);
     else if (selected_border != nullptr)
       draw_custom(draw, *selected_border, false);
+    else if (selected_background != nullptr)
+      draw_custom(draw, *selected_background, false);
     else
       draw_surface(draw, false);
   }

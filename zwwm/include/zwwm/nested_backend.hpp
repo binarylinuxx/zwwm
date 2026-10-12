@@ -119,6 +119,10 @@ class NestedBackend {
   bool frame_pending_ = false;
   bool tag_transition_preparing_ = false;
   bool camera_frame_preparing_ = false;
+  bool overview_ = false;
+  bool overview_dirty_ = false;
+  std::uint32_t overview_first_tag_ = 0, overview_active_tag_ = 1;
+  double overview_progress_ = 0, overview_scroll_ = 0;
   bool capture_ready_ = false;
   bool capture_pending_ = false;
   bool egl_initialization_attempted_ = false;

@@ -15,7 +15,10 @@ endif
 strict_cpp = ['-Wall', '-Wextra', '-Wpedantic', '-Werror']
 runtime_cpp = ['-Wall', '-Wextra', '-Wpedantic']
 version_cpp = ['-DZWWM_VERSION="' + meson.project_version() + '"']
-data_cpp = ['-DZWWM_DATA_DIR="' + (get_option('prefix') / get_option('datadir') / 'zwwm') + '"']
+data_cpp = [
+  '-DZWWM_DATA_DIR="' + (get_option('prefix') / get_option('datadir') / 'zwwm') + '"',
+  '-DZWWM_SOURCE_DATA_DIR="' + (meson.project_source_root() / 'zwwm' / 'data') + '"',
+]
 root_inc = include_directories('.')
 python = import('python').find_installation()
 

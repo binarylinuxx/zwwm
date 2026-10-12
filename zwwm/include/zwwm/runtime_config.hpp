@@ -168,18 +168,24 @@ struct LayerRule {
   LayerEffect effect;
 };
 
+[[nodiscard]] std::string default_shader_source(std::string_view filename);
+
 class RuntimeConfig {
  public:
   DecorationConfig decoration;
   BlurConfig blur;
   GlassConfig glass;
   std::vector<CustomShaderConfig> shaders{
-      {"window", CustomShaderRole::window, "shaders/window.frag", {}},
-      {"border", CustomShaderRole::border, "shaders/border.frag", {}},
-      {"background", CustomShaderRole::background, "shaders/background.frag", {}}};
+      {"window", CustomShaderRole::window, default_shader_source("window.frag"), {}},
+      {"border", CustomShaderRole::border, default_shader_source("border.frag"), {}},
+      {"background", CustomShaderRole::background, default_shader_source("background.frag"), {}}};
   std::string window_shader = "window";
   std::string border_shader = "border";
   std::string background_shader = "background";
+  std::string overview_backdrop_image;
+  std::uint32_t overview_backdrop_blur_radius = 0;
+  std::uint32_t overview_backdrop_blur_passes = 3;
+  std::uint32_t overview_scene_radius = 0;
   LayoutConfig layout;
   InputConfig input;
   KeyboardConfig keyboard;

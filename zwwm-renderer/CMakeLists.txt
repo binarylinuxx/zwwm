@@ -40,6 +40,9 @@ target_include_directories(zwwm_renderer PUBLIC
 )
 target_include_directories(zwwm_renderer PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/zwwm/renderer")
 target_link_libraries(zwwm_renderer PUBLIC PkgConfig::EGL PkgConfig::EPOXY PkgConfig::LIBDRM PkgConfig::PNG)
-target_compile_definitions(zwwm_renderer PRIVATE ZWWM_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/zwwm")
+target_compile_definitions(zwwm_renderer PRIVATE
+  ZWWM_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/zwwm"
+  ZWWM_SOURCE_DATA_DIR="${CMAKE_SOURCE_DIR}/zwwm/data"
+)
 target_compile_options(zwwm_renderer PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_library(zwwm::renderer ALIAS zwwm_renderer)

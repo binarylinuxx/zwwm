@@ -313,6 +313,15 @@ bool parse_rule_size(std::string_view text, WindowRule& rule) {
 
 }  // namespace
 
+std::string default_shader_source(std::string_view filename) {
+  const auto installed = std::filesystem::path(ZWWM_DATA_DIR) / "shaders" / filename;
+  std::error_code error;
+  if (std::filesystem::is_regular_file(installed, error)) return installed.string();
+  const auto checkout = std::filesystem::path(ZWWM_SOURCE_DATA_DIR) / "shaders" / filename;
+  if (std::filesystem::is_regular_file(checkout, error)) return checkout.string();
+  return installed.string();
+}
+
 std::array<float, 4> Color::normalized() const {
   constexpr float scale = 1.0F / 255.0F;
   return {red * scale, green * scale, blue * scale, alpha * scale};
@@ -840,6 +849,32 @@ RuntimeConfigResult compile_runtime_config(const lang::Config& parsed) {
     }
   }
 
+  if (const auto* item = assignment(parsed, "overview"); item != nullptr) {
+    const auto* object = lang::as_object(item->value);
+    if (object == nullptr) error(result.diagnostics, item->location, "overview must be an object");
+    else {
+      if (const auto* value = lang::find_field(*object, "backdrop-image")) {
+        const auto* path = resolved_string(*value, variables);
+        if (path == nullptr) error(result.diagnostics, item->location, "overview.backdrop-image must be a string");
+        else mutable_config->overview_backdrop_image = *path;
+      }
+      for (const auto* name : {"backdrop-blur-radius", "backdrop-blur-passes"}) {
+        const auto* value = lang::find_field(*object, name);
+        if (value == nullptr) continue;
+        const auto* integer = lang::as_integer(*value);
+        const bool passes = std::string_view(name) == "backdrop-blur-passes";
+        if (integer == nullptr || *integer < (passes ? 1 : 0) || *integer > (passes ? 8 : 128))
+          error(result.diagnostics, item->location, "invalid overview." + std::string(name));
+        else if (passes) mutable_config->overview_backdrop_blur_passes = static_cast<unsigned>(*integer);
+        else mutable_config->overview_backdrop_blur_radius = static_cast<unsigned>(*integer);
+      }
+      if (const auto* value = lang::find_field(*object, "scene-radius")) {
+        const auto* integer = lang::as_integer(*value);
+        if (integer == nullptr || *integer < 0 || *integer > 512) error(result.diagnostics, item->location, "overview.scene-radius must be 0..512");
+        else mutable_config->overview_scene_radius = static_cast<unsigned>(*integer);
+      }
+    }
+  }
   if (const auto* item = assignment(parsed, "animations"); item != nullptr) {
     const auto* object = lang::as_object(item->value);
     if (object == nullptr) {
@@ -880,6 +915,7 @@ RuntimeConfigResult compile_runtime_config(const lang::Config& parsed) {
         }
       };
       ranged("tag-duration-ms", mutable_config->animations.tag_duration_ms, 0, 10000);
+      ranged("overview-duration-ms", mutable_config->animations.overview_duration_ms, 0, 10000);
       ranged("open-scale-per-mille", mutable_config->animations.open_scale_per_mille, 500, 1000);
       ranged("close-scale-per-mille", mutable_config->animations.close_scale_per_mille, 500, 1000);
       ranged("open-offset-px", mutable_config->animations.open_offset_px, 0, 4096);
@@ -1000,6 +1036,8 @@ RuntimeConfigResult load_runtime_config_file(const std::string& path) {
   if (result.config != nullptr) {
     auto mutable_config = std::const_pointer_cast<RuntimeConfig>(result.config);
     const auto base = std::filesystem::path(path).parent_path();
+    if (!mutable_config->overview_backdrop_image.empty() && std::filesystem::path(mutable_config->overview_backdrop_image).is_relative())
+      mutable_config->overview_backdrop_image = (base / mutable_config->overview_backdrop_image).lexically_normal().string();
     for (auto& shader : mutable_config->shaders) {
       std::filesystem::path shader_path(shader.source);
       if (shader_path.is_relative()) shader.source = (base / shader_path).lexically_normal().string();
@@ -1015,6 +1053,7 @@ bool load_shader_sources(const RuntimeConfig& config, renderer::ShaderSources* s
   loaded.window = config.window_shader;
   loaded.border = config.border_shader;
   loaded.background = config.background_shader;
+  loaded.overview_backdrop_image = config.overview_backdrop_image;
   for (const auto& shader : config.shaders) {
     std::ifstream input(shader.source, std::ios::binary | std::ios::ate);
     if (!input) {

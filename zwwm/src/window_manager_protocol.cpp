@@ -37,6 +37,7 @@ constexpr IntegerField integer_fields[] = {
     {"animations.move-duration-ms", &AnimationConfig::move_duration_ms, 0, 10000},
     {"animations.fade-duration-ms", &AnimationConfig::fade_duration_ms, 0, 10000},
     {"animations.tag-duration-ms", &AnimationConfig::tag_duration_ms, 0, 10000},
+    {"animations.overview-duration-ms", &AnimationConfig::overview_duration_ms, 0, 10000},
     {"animations.open-scale-per-mille", &AnimationConfig::open_scale_per_mille, 500, 1000},
     {"animations.close-scale-per-mille", &AnimationConfig::close_scale_per_mille, 500, 1000},
     {"animations.open-offset-px", &AnimationConfig::open_offset_px, 0, 4096},
@@ -175,6 +176,18 @@ struct WindowManagerProtocol::Impl {
                       const std::string& name, std::int32_t number) {
       auto* t = draft(resource);
       if (!t->editable()) return;
+      if (name == "overview.scene-radius") {
+        if (number < 0 || number > 512) t->fail("overview.scene-radius must be 0..512");
+        else t->draft.overview_scene_radius = static_cast<unsigned>(number);
+        return;
+      }
+      if (name == "overview.backdrop-blur-radius" || name == "overview.backdrop-blur-passes") {
+        const bool passes = name == "overview.backdrop-blur-passes";
+        if (number < (passes ? 1 : 0) || number > (passes ? 8 : 128)) t->fail("out-of-range value for " + name);
+        else if (passes) t->draft.overview_backdrop_blur_passes = static_cast<unsigned>(number);
+        else t->draft.overview_backdrop_blur_radius = static_cast<unsigned>(number);
+        return;
+      }
       for (const auto& field : integer_fields) {
         if (name != field.name) continue;
         if (number < field.minimum || number > field.maximum) t->fail("out-of-range value for " + name);
@@ -204,6 +217,11 @@ struct WindowManagerProtocol::Impl {
         if (string == "by-click") t->draft.input.focus_mode = FocusMode::by_click;
         else if (string == "hover") t->draft.input.focus_mode = FocusMode::hover;
         else t->fail("input.focus-mode must be by-click or hover");
+        return;
+      }
+      if (name == "overview.backdrop-image") {
+        if (!string.empty() && !std::filesystem::path(string).is_absolute()) t->fail("overview.backdrop-image must be an absolute PNG path or empty");
+        else t->draft.overview_backdrop_image = string;
         return;
       }
       if (name == "animations.tag-transition-axis") {

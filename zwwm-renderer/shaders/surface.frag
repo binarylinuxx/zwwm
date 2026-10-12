@@ -23,6 +23,7 @@ uniform bool background_only;
 uniform bool has_clip;
 uniform vec4 clip_rect;
 uniform float clip_radius;
+uniform bool strict_clip;
 uniform vec3 input_to_clip_row_0;
 uniform vec3 input_to_clip_row_1;
 uniform float background_mask_alpha_threshold;
@@ -70,6 +71,7 @@ void main() {
     vec2 clip_coordinates = vec2(dot(input_to_clip_row_0, input_position),
                                  dot(input_to_clip_row_1, input_position)) * clip_rect.zw;
     float clip_distance = rounded_rectangle_distance(clip_coordinates, clip_rect.zw, clip_radius);
+    if (strict_clip && clip_distance > 0.0) discard;
     coverage *= antialiased_coverage(clip_distance);
   }
   if (border_width > 0.0) {

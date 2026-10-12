@@ -107,7 +107,7 @@ can replace them.
 `set_integer(name, value)` accepts these animation properties:
 
 - `animations.duration-ms`, `open-duration-ms`, `close-duration-ms`,
-  `move-duration-ms`, `fade-duration-ms`, and `tag-duration-ms` (each name has
+  `move-duration-ms`, `fade-duration-ms`, `tag-duration-ms`, and `overview-duration-ms` (each name has
   the `animations.` prefix): `0..10000`.
 - `animations.open-scale-per-mille`, `animations.close-scale-per-mille`: `500..1000`.
 - `animations.open-offset-px`, `animations.close-offset-px`: `0..4096`.
@@ -123,6 +123,16 @@ can replace them.
 `animations.tag-transition-axis` (`horizontal` or `vertical`),
 `keyboard.rules`, `keyboard.model`, `keyboard.layout`, `keyboard.variant`,
 `keyboard.options`, and `shaders.window`, `shaders.border`, `shaders.background`.
+
+`overview.backdrop-image` is an absolute PNG filename or an empty string to use
+the existing desktop background. Integer properties
+`overview.backdrop-blur-radius` (`0..128`, default 0) and
+`overview.backdrop-blur-passes` (`1..8`, default 3) control its blur. Backdrop
+effects are clipped to the area outside scene viewports. Image decoding and
+texture preparation happen before the configuration transaction is applied.
+
+`overview.scene-radius` is an integer from `0..512` logical pixels (default 0).
+It rounds overview scene backgrounds and layer-surface clipping only.
 
 ### Collections
 
@@ -212,6 +222,25 @@ and resizing existing floating dialogs remain native operations.
 `release_policy`, destruction, or disconnect releases ownership and restores
 built-in focus behavior. zwwm retains responsibility for protocol lifecycles,
 buffer/render ownership, lock-screen behavior, and input delivery.
+
+The `dispatch` action `overview` accepts an empty argument to toggle, `on` to
+open, or `off` to close the native tag overview. It presents a scrollable
+vertical strip with live window previews, including inactive tags. Mouse-wheel
+scrolling and Up/Down browse the strip; a click selects a window/tag, keys 1–9
+select a tag, and Escape closes it. Overview input is consumed instead of sent
+to applications, and session locking closes the overview. Application geometry
+and external layout membership are preserved.
+
+Overview renders each tag's existing scene with one shared scale/translation,
+preserving relative window placement and floating stacking. Scene dimensions
+are fixed to the output viewport. Backgrounds and layers are clipped to scene
+bounds, while window previews may extend outside them and remain selectable. Output
+layer surfaces are rendered in each tag scene in their original stacking
+order. The scene uses the configured desktop background and appearance rather
+than an additional overview card theme. Open/close and
+strip scrolling animate from their current values, including interrupted
+toggles. `animations.overview-duration-ms` controls these transitions (default
+280 ms); `animations.enabled = false` or a zero overview duration snaps them.
 
 ### Own the layout
 

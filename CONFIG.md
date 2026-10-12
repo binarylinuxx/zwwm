@@ -153,6 +153,10 @@ Use `""` for actions that do not need an argument.
 
 ## User Shaders
 
+When `shaders` is omitted, zwwm loads its packaged default shaders, with a
+checkout-asset fallback for development builds. Explicit relative shader
+sources resolve beside the entry-point configuration file.
+
 `shaders` is a registry of named OpenGL ES 3 fragment shaders. Every entry has
 a `role`, a source path, and optional reflected values. At least one `window`,
 `border`, and `background` shader is required. The first shader declared for a
@@ -331,6 +335,7 @@ animations = {
 | `move-duration-ms` | `0` (inherit `duration-ms`) | `0..10000` |
 | `fade-duration-ms` | `0` (inherit the open/close duration) | `0..10000` |
 | `tag-duration-ms` | `360` | `0..10000` |
+| `overview-duration-ms` | `280` | `0..10000`; zero disables overview zoom/scroll animation |
 | `open-window` | `true` | Boolean |
 | `resize` | `true` | Boolean |
 | `close` | `true` | Boolean |
@@ -437,6 +442,27 @@ layout = {
   smart-gaps = true
 }
 ```
+
+## Overview backdrop
+
+```zw
+overview = {
+  backdrop-image = "/home/user/Pictures/overview-backdrop.png"
+  backdrop-blur-radius = 24
+  backdrop-blur-passes = 3
+  scene-radius = 24
+}
+```
+
+The PNG image fills the output using a centered cover crop. Backdrop image and
+blur are applied only outside overview scenes. Use an empty image path for the
+usual background, radius `0..128` (default 0), and passes `1..8` (default 3).
+Relative image paths in `.zw` files resolve beside the entry-point config.
+External clients set `overview.backdrop-image`, `overview.backdrop-blur-radius`,
+and `overview.backdrop-blur-passes` through the window-manager protocol.
+`overview.scene-radius` accepts `0..512` logical pixels (default 0), rounds scene
+backgrounds and their layers during overview only, and leaves window previews
+free to extend outside scene bounds.
 
 ## Input
 
