@@ -693,6 +693,34 @@ ValidationResult validate_config(const Config& config, std::span<const Validatio
       warn_unknown_fields(*object, keyboard_fields, result.diagnostics, assignment.location, "keyboard");
       continue;
     }
+    if (assignment.key == "overview") {
+      const auto* object = std::get_if<Value::Object>(&assignment.value.data);
+      if (object == nullptr) {
+        validation_error(result.diagnostics, assignment.location, "overview must be an object");
+        continue;
+      }
+      for (const auto* name : {"backdrop-blur-radius", "backdrop-blur-passes"}) {
+        const auto* value = lookup_field(*object, name);
+        if (value == nullptr) continue;
+        const auto* integer = std::get_if<std::int64_t>(&value->data);
+        const bool passes = std::string_view(name) == "backdrop-blur-passes";
+        if (integer == nullptr || *integer < (passes ? 1 : 0) || *integer > (passes ? 8 : 128))
+          validation_error(result.diagnostics, assignment.location, "invalid overview." + std::string(name));
+      }
+      if (const auto* value = lookup_field(*object, "scene-radius")) {
+        const auto* integer = std::get_if<std::int64_t>(&value->data);
+        if (integer == nullptr || *integer < 0 || *integer > 512)
+          validation_error(result.diagnostics, assignment.location, "overview.scene-radius must be 0..512");
+      }
+      if (const auto* value = lookup_field(*object, "master-ratio")) {
+        const auto* integer = std::get_if<std::int64_t>(&value->data);
+        if (integer == nullptr || *integer < 10 || *integer > 90)
+          validation_error(result.diagnostics, assignment.location, "overview.master-ratio must be 10..90");
+      }
+      constexpr std::array<std::string_view, 6> fields = {"backdrop-image", "backdrop-blur-radius", "backdrop-blur-passes", "scene-radius", "layout", "master-ratio"};
+      warn_unknown_fields(*object, fields, result.diagnostics, assignment.location, "overview");
+      continue;
+    }
     if (assignment.key == "animations") {
       const auto* object = std::get_if<Value::Object>(&assignment.value.data);
       if (object == nullptr) {
@@ -727,6 +755,7 @@ ValidationResult validate_config(const Config& config, std::span<const Validatio
       ranged_animation("tag-parallax-per-mille", 0, 1000);
       ranged_animation("tag-fade-per-mille", 0, 1000);
       ranged_animation("tag-duration-ms", 0, 10000);
+      ranged_animation("overview-duration-ms", 0, 10000);
       ranged_animation("open-duration-ms", 0, 10000);
       ranged_animation("close-duration-ms", 0, 10000);
       ranged_animation("move-duration-ms", 0, 10000);
@@ -776,12 +805,12 @@ ValidationResult validate_config(const Config& config, std::span<const Validatio
                               "animations.cubic-bezier");
         }
       }
-      constexpr std::array<std::string_view, 20> animation_fields = {
+      constexpr std::array<std::string_view, 21> animation_fields = {
           "enabled", "duration-ms", "open-duration-ms", "close-duration-ms", "move-duration-ms", "fade-duration-ms",
           "tag-duration-ms", "spring", "cubic-bezier", "open-window",
           "resize", "close", "open-scale-per-mille", "close-scale-per-mille", "open-offset-px",
           "close-offset-px", "tag-scale-per-mille", "tag-parallax-per-mille", "tag-fade-per-mille",
-          "tag-transition-axis"};
+          "tag-transition-axis", "overview-duration-ms"};
       warn_unknown_fields(*object, animation_fields, result.diagnostics, assignment.location, "animations");
       continue;
     }

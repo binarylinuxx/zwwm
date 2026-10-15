@@ -3,6 +3,7 @@
 #include <zwayland/server/display.hpp>
 #include <wayland-zwayland-server.h>
 #include <session-lock-zwayland-server.h>
+#include <zwwm-focus-grab-v1-zwayland-server.h>
 
 #include <algorithm>
 #include <cstring>
@@ -25,7 +26,17 @@ void blank_unlocked_scene(SessionLockState* lock) {
   end_interactive(lock == nullptr || lock->observer == nullptr ? nullptr : lock->observer->seat);
   auto* observer = lock->observer;
   auto* seat = observer->seat;
+  dismiss_focus_grab(seat, protocol::ZWWM_FOCUS_GRAB_V1_REASON_LOCKED);
   scene_batch(observer, false);
+  if (observer->overview_visible) {
+    stop_overview_animation(observer);
+    seat->cursor_override_shape.clear();
+    apply_cursor_shape(seat);
+    for (const auto& output : *observer->outputs)
+      if (observer->callback != nullptr)
+        observer->callback(observer->data, ShmBufferView{.output = output->info.id,
+            .overview_changed = true, .overview = false, .window_shader = {}, .border_shader = {}});
+  }
   cancel_touches(seat);
   reset_virtual_keyboards(seat);
   for (auto* constraint : seat->constraints) deactivate_constraint(constraint, true);

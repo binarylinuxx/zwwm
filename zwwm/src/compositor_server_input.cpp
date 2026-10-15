@@ -26,7 +26,7 @@ namespace zwwm::detail {
 
 struct CursorShapeDevice { SeatState* seat = nullptr; zwayland::server::Resource* pointer = nullptr; Observer* observer = nullptr; };
 
-SeatState::~SeatState() { while (!touches.empty()) touches.back()->destroy(); while (!idle_notifications.empty()) idle_notifications.back()->resource->destroy(); while (!relative_pointers.empty()) relative_pointers.back()->resource->destroy(); }
+SeatState::~SeatState() { destroy_focus_grabs(this); while (!touches.empty()) touches.back()->destroy(); while (!idle_notifications.empty()) idle_notifications.back()->resource->destroy(); while (!relative_pointers.empty()) relative_pointers.back()->resource->destroy(); }
 
 bool update_xkb(SeatState* seat, const KeyboardConfig& config) {
   if (seat->xkb_context_handle == nullptr) return false;

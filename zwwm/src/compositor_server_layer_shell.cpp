@@ -15,7 +15,22 @@ namespace protocol = zwayland::generated;
 namespace zwwm::detail {
 namespace {
 
-void layer_destroyed(zwayland::server::Resource* resource) { auto* layer = resource->data<LayerSurfaceState>(); if (layer == nullptr) return; if (layer->xwlr != nullptr) { layer->xwlr->layer = nullptr; layer->xwlr->resource->destroy(); } if (layer->surface != nullptr) { auto* observer = layer->surface->observer; const bool focused = observer != nullptr && observer->seat != nullptr && root(observer->seat->keyboard_focus) == layer->surface; if (auto* output = output_state(observer, layer->output); output != nullptr) std::erase(output->layer_roots[layer->current.layer], layer->surface); layer->surface->layer_surface = nullptr; if (focused) set_keyboard_focus(observer->seat, observer->seat->regular_focus); configure_layout(observer); refresh_layer_keyboard_focus(observer); } delete layer; }
+void layer_destroyed(zwayland::server::Resource* resource) {
+  auto* layer = resource->data<LayerSurfaceState>();
+  if (layer == nullptr) return;
+  if (layer->xwlr != nullptr) { layer->xwlr->layer = nullptr; layer->xwlr->resource->destroy(); }
+  if (layer->surface != nullptr) {
+    auto* observer = layer->surface->observer;
+    const bool focused = observer != nullptr && observer->seat != nullptr && root(observer->seat->keyboard_focus) == layer->surface;
+    if (auto* output = output_state(observer, layer->output); output != nullptr) std::erase(output->layer_roots[layer->current.layer], layer->surface);
+    layer->surface->layer_surface = nullptr;
+    if (observer != nullptr) refresh_focus_grab(observer->seat);
+    if (focused && root(observer->seat->keyboard_focus) == layer->surface) set_keyboard_focus(observer->seat, observer->seat->regular_focus);
+    configure_layout(observer);
+    refresh_layer_keyboard_focus(observer);
+  }
+  delete layer;
+}
 void layer_set_size(zwayland::server::Client*, zwayland::server::Resource* resource, std::uint32_t width, std::uint32_t height) { auto* layer = resource->data<LayerSurfaceState>(); if (width > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) || height > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) { resource->post_error(protocol::ZWWM_LAYER_SURFACE_V1_ERROR_INVALID_SIZE, "invalid layer size"); return; } layer->pending.width = static_cast<int>(width); layer->pending.height = static_cast<int>(height); }
 void layer_set_anchor(zwayland::server::Client*, zwayland::server::Resource* resource, std::uint32_t anchor) { if ((anchor & ~15U) != 0) { resource->post_error(protocol::ZWWM_LAYER_SURFACE_V1_ERROR_INVALID_ANCHOR, "invalid layer anchor"); return; } resource->data<LayerSurfaceState>()->pending.anchor = anchor; }
 void layer_set_zone(zwayland::server::Client*, zwayland::server::Resource* resource, std::int32_t zone) { resource->data<LayerSurfaceState>()->pending.zone = zone; }

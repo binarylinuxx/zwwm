@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="zwwm_focus_grab_v1">
+  <copyright>Copyright 2026 binarylinuxx. SPDX-License-Identifier: BSD-3-Clause</copyright>
+  <interface name="zwwm_focus_grab_manager_v1" version="1">
+    <description summary="dismissible keyboard focus for layer panels">
+      A client can grab keyboard focus for its own layer surface and its
+      subsurfaces/popups. Clicking or touching outside dismisses the grab;
+      the client handles dismissed by hiding or unmapping its panel. Outside
+      activation is consumed, including the matching pointer release.
+    </description>
+    <enum name="error"><entry name="invalid_surface" value="0"/></enum>
+    <request name="destroy" type="destructor"/>
+    <request name="get_grab">
+      <arg name="id" type="new_id" interface="zwwm_focus_grab_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+  </interface>
+  <interface name="zwwm_focus_grab_v1" version="1">
+    <enum name="reason">
+      <entry name="outside" value="0"/>
+      <entry name="unmapped" value="1"/>
+      <entry name="replaced" value="2"/>
+      <entry name="locked" value="3"/>
+      <entry name="released" value="4"/>
+    </enum>
+    <request name="destroy" type="destructor"/>
+    <request name="activate">
+      <description summary="activate or arm a grab">
+        A mapped panel receives focus immediately. An unmapped panel is armed
+        until it maps. One grab is active per seat; another activation dismisses
+        the previous grab. A dismissed object can be activated again.
+      </description>
+    </request>
+    <request name="release"/>
+    <event name="activated"/>
+    <event name="dismissed"><arg name="reason" type="uint" enum="reason"/></event>
+  </interface>
+</protocol>

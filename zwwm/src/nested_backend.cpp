@@ -96,6 +96,7 @@ struct NestedBackend::Window {
   std::vector<std::uint32_t> pixels;
   GLuint texture = 0;
   GLuint upload_texture = 0;
+  std::uint32_t overview_tag = 0;
   std::uint64_t buffer_generation = 0;
   bool dmabuf_texture = false;
 };
@@ -608,6 +609,15 @@ void NestedBackend::publish_dmabuf_importer() {
 }
 
 void NestedBackend::present(const ShmBufferView& buffer) {
+  if (buffer.overview_changed) {
+    overview_ = buffer.overview;
+    overview_first_tag_ = buffer.overview_first_tag;
+    overview_active_tag_ = buffer.overview_active_tag;
+    overview_progress_ = buffer.overview_progress;
+    overview_scroll_ = buffer.overview_scroll;
+    overview_dirty_ = true;
+    return;
+  }
   if (buffer.scene_reset) {
     animations_.remove(buffer.root_surface_id);
     for (auto& window : windows_) {
@@ -671,6 +681,7 @@ void NestedBackend::present(const ShmBufferView& buffer) {
       window.x = buffer.x;
       window.y = buffer.y;
       window.toplevel = true;
+      window.overview_tag = buffer.overview_tag;
       window.removed = false; window.tag_outgoing = false;
        window.suppress_geometry_animation = buffer.suppress_geometry_animation;
        window.track_geometry_animation = buffer.track_geometry_animation;
@@ -776,8 +787,11 @@ void NestedBackend::present(const ShmBufferView& buffer) {
                buffer.stride < buffer.width * 4))) {
     return;
   }
-  Window window = is_new ? Window{} : *it;
+  Window window = is_new ? Window{} : std::move(*it);
   const bool resized = window.buffer_width != buffer.width || window.buffer_height != buffer.height;
+  const bool allocate_texture = resized || window.upload_texture == 0;
+  const bool full_upload = resized || window.pixels.empty() || window.buffer_generation != buffer.buffer_generation ||
+      window.dmabuf_texture || (renderer_ != nullptr && allocate_texture);
   const bool moved = !is_new && (window.x != buffer.x || window.y != buffer.y ||
                                  window.geometry_x != buffer.window_geometry_x || window.geometry_y != buffer.window_geometry_y ||
                                  window.geometry_width != buffer.window_geometry_width || window.geometry_height != buffer.window_geometry_height);
@@ -800,6 +814,7 @@ void NestedBackend::present(const ShmBufferView& buffer) {
   window.geometry_width = buffer.window_geometry_width;
   window.geometry_height = buffer.window_geometry_height;
   window.toplevel = buffer.toplevel;
+  window.overview_tag = buffer.overview_tag;
   window.popup = buffer.popup;
   window.fullscreen = buffer.fullscreen;
   window.suppress_geometry_animation = buffer.suppress_geometry_animation;
@@ -831,10 +846,10 @@ void NestedBackend::present(const ShmBufferView& buffer) {
   window.layer_surface = buffer.layer_surface;
   window.format = buffer.format;
   if (resized || window.pixels.empty()) window.pixels.resize(static_cast<std::size_t>(buffer.width) * buffer.height);
-  const int left = std::clamp(resized ? 0 : buffer.damage_x, 0, buffer.width);
-  const int top = std::clamp(resized ? 0 : buffer.damage_y, 0, buffer.height);
-  const int right = std::clamp(resized ? buffer.width : buffer.damage_x + buffer.damage_width, left, buffer.width);
-  const int bottom = std::clamp(resized ? buffer.height : buffer.damage_y + buffer.damage_height, top, buffer.height);
+  const int left = std::clamp(full_upload ? 0 : buffer.damage_x, 0, buffer.width);
+  const int top = std::clamp(full_upload ? 0 : buffer.damage_y, 0, buffer.height);
+  const int right = std::clamp(full_upload ? buffer.width : buffer.damage_x + buffer.damage_width, left, buffer.width);
+  const int bottom = std::clamp(full_upload ? buffer.height : buffer.damage_y + buffer.damage_height, top, buffer.height);
   window.damage_x = left;
   window.damage_y = top;
   window.damage_width = right - left;
@@ -849,6 +864,7 @@ void NestedBackend::present(const ShmBufferView& buffer) {
       for (int x = left; x < right; ++x) row[x] |= 0xff000000U;
     }
   }
+  if (buffer.pixels != nullptr) window.buffer_generation = buffer.buffer_generation;
   if (renderer_ != nullptr && buffer.pixels != nullptr) {
     if (window.dmabuf_texture && window.texture != 0 && renderer_->importer != nullptr)
       (void)renderer_->importer->release(window.texture);
@@ -860,7 +876,7 @@ void NestedBackend::present(const ShmBufferView& buffer) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    if (resized) {
+    if (allocate_texture) {
       glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, buffer.width, buffer.height, 0, GL_BGRA, GL_UNSIGNED_BYTE, window.pixels.data());
     } else if (right > left && bottom > top) {
       glPixelStorei(GL_UNPACK_ROW_LENGTH, buffer.width);
@@ -898,7 +914,7 @@ void NestedBackend::repaint_gpu() {
   if (camera_frame_preparing_ || tag_transition_preparing_) return;
   if (renderer_ == nullptr || egl_window_ == nullptr || frame_pending_) return;
   const std::uint64_t now = monotonic_ms();
-  const auto tag = animations_.tag_transition(now);
+  const auto tag = overview_ ? std::nullopt : animations_.tag_transition(now);
   if (!tag) {
     for (auto& window : windows_) {
       if (!window.tag_outgoing) continue;
@@ -943,6 +959,13 @@ void NestedBackend::repaint_gpu() {
   renderer::FramePlan frame;
   frame.draw_background = true;
   frame.shader_time = static_cast<float>(now % 1000000U) / 1000.0F;
+  frame.overview_backdrop = overview_;
+  frame.overview_backdrop_opacity = static_cast<float>(overview_progress_);
+  frame.overview_backdrop_blur_radius = config_->overview_backdrop_blur_radius;
+  frame.overview_backdrop_blur_passes = config_->overview_backdrop_blur_passes;
+  if (overview_) backend_scene::overview_scenes(frame, {{0, 0}, {logical_width_, logical_height_}},
+      overview_scroll_, overview_active_tag_, overview_progress_, config_->background_shader, config_->overview_scene_radius,
+      config_->overview_stack_master, config_->overview_master_ratio / 100.0);
   std::optional<renderer::DrawCall> pending_border;
   std::uint64_t pending_border_root = 0;
   const auto apply_effect_parameters = [&](renderer::DrawCall& draw, std::string_view shader = {}) {
@@ -972,6 +995,16 @@ void NestedBackend::repaint_gpu() {
       frame.draws.back().background_mask_texture = window.layer_surface;
       frame.draws.back().background_mask_alpha_threshold = window.background_blur_ignore_alpha;
       apply_effect_parameters(frame.draws.back());
+      if (overview_ && root->layer_surface) {
+        auto draw = std::move(frame.draws.back());
+        frame.draws.pop_back();
+        const renderer::Rect area{{0, 0}, {logical_width_, logical_height_}};
+        for (unsigned scene = 1; scene <= 9; ++scene) {
+          auto projected = backend_scene::overview_layer(draw, area, overview_scroll_, overview_active_tag_, overview_progress_, scene,
+              config_->overview_scene_radius, config_->overview_stack_master, config_->overview_master_ratio / 100.0);
+          if (backend_scene::overview_draw_visible(projected, area)) frame.draws.push_back(std::move(projected));
+        }
+      }
       continue;
     }
     renderer::Rect tag_bounds;
@@ -1043,6 +1076,7 @@ void NestedBackend::repaint_gpu() {
     frame.draws.back().background_blur_radius = static_cast<float>(window.background_blur_radius);
     apply_effect_parameters(frame.draws.back(), window.window_shader);
     backend_scene::camera_geometry(frame.draws.back(), *root, window, tag_bounds);
+    if (overview_ && !backend_scene::overview_draw_visible(frame.draws.back(), {{0, 0}, {logical_width_, logical_height_}})) frame.draws.pop_back();
   }
   if (pending_border) frame.draws.push_back(std::move(*pending_border));
   if (error_popup_visible_ && error_popup_) {
@@ -1093,7 +1127,7 @@ void NestedBackend::repaint() {
   software_logical_.resize(static_cast<std::size_t>(logical_width_) * logical_height_);
   auto* destination = software_logical_.data();
   const std::uint64_t now = monotonic_ms();
-  const auto tag = animations_.tag_transition(now);
+  const auto tag = overview_ ? std::nullopt : animations_.tag_transition(now);
   const bool tag_cleanup = !tag &&
                            std::any_of(windows_.begin(), windows_.end(),
                                        [](const Window& window) { return window.tag_outgoing; });
@@ -1180,7 +1214,7 @@ void NestedBackend::repaint() {
       dirty_bottom = std::max(dirty_bottom, content_y + (relative_y + window.damage_y + window.damage_height + 1) * content_h / goal_h);
     }
   }
-  if (animation_active || tag_cleanup || camera_moved) {
+  if (animation_active || tag_cleanup || camera_moved || overview_ || overview_dirty_) {
     dirty_left = 0;
     dirty_top = 0;
     dirty_right = static_cast<int>(logical_width_);
@@ -1196,20 +1230,72 @@ void NestedBackend::repaint() {
   dirty_left = std::clamp(dirty_left, 0, static_cast<int>(logical_width_)); dirty_top = std::clamp(dirty_top, 0, static_cast<int>(logical_height_));
   dirty_right = std::clamp(dirty_right, dirty_left, static_cast<int>(logical_width_)); dirty_bottom = std::clamp(dirty_bottom, dirty_top, static_cast<int>(logical_height_));
   for (int y = dirty_top; y < dirty_bottom; ++y) std::fill_n(destination + static_cast<std::size_t>(y) * logical_width_ + dirty_left, dirty_right - dirty_left, 0xff20242bU);
+  overview_dirty_ = false;
+  if (overview_) {
+    renderer::FramePlan cards;
+    backend_scene::overview_scenes(cards, {{0, 0}, {logical_width_, logical_height_}},
+        overview_scroll_, overview_active_tag_, overview_progress_, config_->background_shader, config_->overview_scene_radius,
+        config_->overview_stack_master, config_->overview_master_ratio / 100.0);
+    for (const auto& draw : cards.draws) {
+      const int left = draw.bounds.origin.x, top = draw.bounds.origin.y;
+      const int right = left + static_cast<int>(draw.bounds.size.width), bottom = top + static_cast<int>(draw.bounds.size.height);
+      const auto color = 0xff000000U | (static_cast<unsigned>(draw.color[0] * 255) << 16) |
+          (static_cast<unsigned>(draw.color[1] * 255) << 8) | static_cast<unsigned>(draw.color[2] * 255);
+      const auto inside = [](double x, double y, double l, double t, double r, double b, double radius) {
+        if (x < l || y < t || x >= r || y >= b) return false;
+        radius = std::max(0.0, std::min({radius, (r - l) / 2, (b - t) / 2}));
+        const double dx = std::max({l + radius - x, x - (r - radius), 0.0});
+        const double dy = std::max({t + radius - y, y - (b - radius), 0.0});
+        return dx * dx + dy * dy <= radius * radius;
+      };
+      const double opacity = std::clamp(static_cast<double>(draw.opacity), 0.0, 1.0);
+      for (int y = std::max(dirty_top, top); y < std::min(dirty_bottom, bottom); ++y)
+        for (int x = std::max(dirty_left, left); x < std::min(dirty_right, right); ++x) {
+          if (!inside(x + 0.5, y + 0.5, left, top, right, bottom, draw.corner_radius)) continue;
+          if (draw.border_width > 0 && inside(x + 0.5, y + 0.5, left + 2, top + 2, right - 2, bottom - 2, draw.corner_radius - 2)) continue;
+          auto& pixel = destination[static_cast<std::size_t>(y) * logical_width_ + x];
+          unsigned blended = 0xff000000U;
+          for (const unsigned shift : {0U, 8U, 16U}) {
+            const auto component = std::lround(((pixel >> shift) & 255U) * (1 - opacity) + ((color >> shift) & 255U) * opacity);
+            blended |= static_cast<unsigned>(component) << shift;
+          }
+          pixel = blended;
+        }
+    }
+  }
   for (const auto& window : windows_) {
     const auto root_it = std::find_if(windows_.begin(), windows_.end(), [&window](const Window& item) { return item.id == window.root_id; });
     const auto* bounds = placement_for(window.root_id);
     renderer::Rect tag_bounds;
     if (root_it == windows_.end() || !root_it->content_ready || root_it->width == 0 || root_it->height == 0) continue;
     if (!root_it->toplevel) {
-      for (int y = std::max(dirty_top, window.y); y < std::min(dirty_bottom, window.y + window.height); ++y) for (int x = std::max(dirty_left, window.x); x < std::min(dirty_right, window.x + window.width); ++x) {
-        const int sx = static_cast<int>((window.source_left + (window.source_right - window.source_left) * (x - window.x) / window.width) * window.buffer_width);
-        const int sy = static_cast<int>((window.source_top + (window.source_bottom - window.source_top) * (y - window.y) / window.height) * window.buffer_height);
-        if (sx >= 0 && sy >= 0 && sx < window.buffer_width && sy < window.buffer_height) {
-          const auto pixel = window.pixels[static_cast<std::size_t>(sy) * window.buffer_width + sx] | (window.format == protocol::WL_SHM_FORMAT_XRGB8888 ? 0xff000000U : 0U);
-          destination[static_cast<std::size_t>(y) * logical_width_ + x] = source_over(destination[static_cast<std::size_t>(y) * logical_width_ + x], apply_opacity(pixel, window.compositor_opacity));
+      const auto paint = [&](OverviewTransform transform, renderer::Rect clip, int radius = 0) {
+        const auto scene = clip;
+        const auto projected = overview_project({{window.x, window.y}, {static_cast<unsigned>(window.width), static_cast<unsigned>(window.height)}}, transform);
+        clip = backend_scene::overview_intersection(clip, projected);
+        const int right = clip.origin.x + static_cast<int>(clip.size.width), bottom = clip.origin.y + static_cast<int>(clip.size.height);
+        for (int y = std::max(dirty_top, clip.origin.y); y < std::min(dirty_bottom, bottom); ++y)
+          for (int x = std::max(dirty_left, clip.origin.x); x < std::min(dirty_right, right); ++x) {
+            if (radius > 0 && !inside_rounded_rect(x, y, scene.origin.x, scene.origin.y, scene.size.width, scene.size.height, radius)) continue;
+            const double local_x = (x + 0.5 - transform.x) / transform.scale - window.x;
+            const double local_y = (y + 0.5 - transform.y) / transform.scale - window.y;
+            const int sx = static_cast<int>((window.source_left + (window.source_right - window.source_left) * local_x / window.width) * window.buffer_width);
+            const int sy = static_cast<int>((window.source_top + (window.source_bottom - window.source_top) * local_y / window.height) * window.buffer_height);
+            if (sx < 0 || sy < 0 || sx >= window.buffer_width || sy >= window.buffer_height) continue;
+            const auto pixel = window.pixels[static_cast<std::size_t>(sy) * window.buffer_width + sx] | (window.format == protocol::WL_SHM_FORMAT_XRGB8888 ? 0xff000000U : 0U);
+            destination[static_cast<std::size_t>(y) * logical_width_ + x] = source_over(destination[static_cast<std::size_t>(y) * logical_width_ + x], apply_opacity(pixel, window.compositor_opacity));
+          }
+      };
+      const renderer::Rect area{{0, 0}, {logical_width_, logical_height_}};
+      if (overview_ && root_it->layer_surface) {
+        for (unsigned scene = 1; scene <= 9; ++scene) {
+          const auto transform = overview_scene_transform(area, area, overview_scroll_, scene, overview_progress_, overview_active_tag_,
+              config_->overview_stack_master, config_->overview_master_ratio / 100.0);
+          paint(transform, overview_tag_rect(area, overview_scroll_, scene, overview_progress_, overview_active_tag_, {},
+              config_->overview_stack_master, config_->overview_master_ratio / 100.0),
+                static_cast<int>(std::lround(config_->overview_scene_radius * overview_progress_)));
         }
-      }
+      } else paint({}, area);
       continue;
     }
     if (bounds == nullptr) continue;
@@ -1236,10 +1322,12 @@ void NestedBackend::repaint() {
     const int draw_y = window.toplevel ? content_y : content_y + (relative_y - geometry.y) * content_h / goal_h;
     const int draw_width = window.toplevel ? std::max(1, geometry.width * content_w / goal_w) : std::max(1, window.width * content_w / goal_w);
     const int draw_height = window.toplevel ? std::max(1, geometry.height * content_h / goal_h) : std::max(1, window.height * content_h / goal_h);
-    const int clip_left = window.popup ? dirty_left : std::max(dirty_left, content_x);
-    const int clip_top = window.popup ? dirty_top : std::max(dirty_top, content_y);
-    const int clip_right = window.popup ? dirty_right : std::min(dirty_right, content_x + content_w);
-    const int clip_bottom = window.popup ? dirty_bottom : std::min(dirty_bottom, content_y + content_h);
+    renderer::Rect scene_clip{{dirty_left, dirty_top}, {static_cast<unsigned>(dirty_right - dirty_left), static_cast<unsigned>(dirty_bottom - dirty_top)}};
+    const int scene_right = scene_clip.origin.x + static_cast<int>(scene_clip.size.width), scene_bottom = scene_clip.origin.y + static_cast<int>(scene_clip.size.height);
+    const int clip_left = window.popup ? scene_clip.origin.x : std::max(scene_clip.origin.x, content_x);
+    const int clip_top = window.popup ? scene_clip.origin.y : std::max(scene_clip.origin.y, content_y);
+    const int clip_right = window.popup ? scene_right : std::min(scene_right, content_x + content_w);
+    const int clip_bottom = window.popup ? scene_bottom : std::min(scene_bottom, content_y + content_h);
     for (int y = std::max(clip_top, draw_y); y < std::min(clip_bottom, draw_y + draw_height); ++y) for (int x = std::max(clip_left, draw_x); x < std::min(clip_right, draw_x + draw_width); ++x) {
        const int logical_x = window.toplevel ? geometry.x + (x - content_x) * goal_w / content_w :
                                                  (x - content_x) * goal_w / content_w + geometry.x - relative_x;
@@ -1258,8 +1346,8 @@ void NestedBackend::repaint() {
       const auto border = apply_opacity(premultiplied(window.focused ? config_->decoration.focused_border_color
                                                                      : config_->decoration.border_color),
                                         (animation ? animation->opacity : 1.0F) * tag_root.opacity);
-      for (int y = std::max(dirty_top, bounds->origin.y); y < std::min(dirty_bottom, bounds->origin.y + static_cast<int>(bounds->size.height)); ++y) {
-        for (int x = std::max(dirty_left, bounds->origin.x); x < std::min(dirty_right, bounds->origin.x + static_cast<int>(bounds->size.width)); ++x) {
+      for (int y = std::max(scene_clip.origin.y, bounds->origin.y); y < std::min(scene_bottom, bounds->origin.y + static_cast<int>(bounds->size.height)); ++y) {
+        for (int x = std::max(scene_clip.origin.x, bounds->origin.x); x < std::min(scene_right, bounds->origin.x + static_cast<int>(bounds->size.width)); ++x) {
           if (inside_rounded_rect(x, y, bounds->origin.x, bounds->origin.y,
                                   static_cast<int>(bounds->size.width), static_cast<int>(bounds->size.height), outer_radius) &&
               !inside_rounded_rect(x, y, content_x, content_y, content_w, content_h, inner_radius)) {

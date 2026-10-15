@@ -129,6 +129,7 @@ int main(int argc, char** argv) {
     zwwm::NestedBackend* nested;
     zwwm::RuntimeBackend* runtime = nullptr;
     zwwm::PluginLoader* plugins = nullptr;
+    bool protocol_shader_config = false;
     void show_error(const std::string& message) {
       if (runtime != nullptr) runtime->show_error(message);
       else nested->show_error(message);
@@ -146,6 +147,21 @@ int main(int argc, char** argv) {
       return rebuilt ? std::string{} : error;
     }
     std::string apply_config(std::shared_ptr<const zwwm::RuntimeConfig> config) {
+      if (protocol_shader_config) {
+        const auto current = compositor->configuration();
+        auto merged = std::make_shared<zwwm::RuntimeConfig>(*config);
+        merged->shaders = current->shaders;
+        merged->window_shader = current->window_shader;
+        merged->border_shader = current->border_shader;
+        merged->background_shader = current->background_shader;
+        merged->overview_backdrop_image = current->overview_backdrop_image;
+        merged->overview_backdrop_blur_radius = current->overview_backdrop_blur_radius;
+        merged->overview_backdrop_blur_passes = current->overview_backdrop_blur_passes;
+        merged->overview_scene_radius = current->overview_scene_radius;
+        merged->overview_stack_master = current->overview_stack_master;
+        merged->overview_master_ratio = current->overview_master_ratio;
+        config = std::move(merged);
+      }
       if (!compositor->set_config(config)) return "could not apply keyboard configuration";
       if (runtime != nullptr) runtime->set_config(config);
       else nested->set_config(std::move(config));
@@ -171,6 +187,7 @@ int main(int argc, char** argv) {
         nested->set_config(config);
       }
       compositor->config_batch(true);
+      protocol_shader_config = true;
       return {};
     }
     std::string set_cursor(const std::string& theme, std::uint32_t size) {

@@ -15,7 +15,10 @@ endif
 strict_cpp = ['-Wall', '-Wextra', '-Wpedantic', '-Werror']
 runtime_cpp = ['-Wall', '-Wextra', '-Wpedantic']
 version_cpp = ['-DZWWM_VERSION="' + meson.project_version() + '"']
-data_cpp = ['-DZWWM_DATA_DIR="' + (get_option('prefix') / get_option('datadir') / 'zwwm') + '"']
+data_cpp = [
+  '-DZWWM_DATA_DIR="' + (get_option('prefix') / get_option('datadir') / 'zwwm') + '"',
+  '-DZWWM_SOURCE_DATA_DIR="' + (meson.project_source_root() / 'zwwm' / 'data') + '"',
+]
 root_inc = include_directories('.')
 python = import('python').find_installation()
 
@@ -115,6 +118,7 @@ protocol_specs = [
   ['zwwm-data-control-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-data-control-v1.xml')],
   ['wlr-data-control-unstable-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/wlr-data-control-unstable-v1.xml')],
   ['zwwm-layer-shell-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-layer-shell-v1.xml')],
+  ['zwwm-focus-grab-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-focus-grab-v1.xml')],
   ['zwwm-decoration-manager-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-decoration-manager-v1.xml')],
   ['zwwm-virtual-keyboard-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-virtual-keyboard-v1.xml')],
   ['zwwm-window-manager-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-window-manager-v1.xml')],
@@ -296,6 +300,7 @@ compositor_sources = files(
   'zwwm/src/compositor_server_touch.cpp',
   'zwwm/src/compositor_server_idle.cpp',
   'zwwm/src/compositor_server_layer_shell.cpp',
+  'zwwm/src/compositor_server_focus_grab.cpp',
   'zwwm/src/compositor_server_decoration.cpp',
   'zwwm/src/compositor_server_session_lock.cpp',
   'zwwm/src/compositor_server_surface_extensions.cpp',

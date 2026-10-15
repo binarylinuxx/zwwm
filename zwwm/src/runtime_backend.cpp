@@ -247,6 +247,8 @@ struct RuntimeBackend::DrmOutput {
     bool canvas_camera = false;
     GLuint texture = 0;
     bool owns_texture = false;
+    std::uint32_t overview_tag = 0;
+    std::uint64_t shm_generation = 0;
     bool removed = false;
     bool tag_outgoing = false;
     std::string window_shader;
@@ -261,6 +263,9 @@ struct RuntimeBackend::DrmOutput {
   std::vector<ShmTexture> shm_textures;
   bool tag_transition_preparing = false;
   bool camera_frame_preparing = false;
+  bool overview = false;
+  std::uint32_t overview_first_tag = 0, overview_active_tag = 1;
+  double overview_progress = 0, overview_scroll = 0;
   std::uint32_t connector_id = 0;
   OutputInfo output;
   std::uint32_t crtc_id = 0;
@@ -832,6 +837,14 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
         eglMakeCurrent(device->egl_display, card->egl_surface, card->egl_surface, device->egl_context) != EGL_TRUE) {
       continue;
     }
+    if (buffer.overview_changed) {
+      card->overview = buffer.overview;
+      card->overview_first_tag = buffer.overview_first_tag;
+      card->overview_active_tag = buffer.overview_active_tag;
+      card->overview_progress = buffer.overview_progress;
+      card->overview_scroll = buffer.overview_scroll;
+      continue;
+    }
     if (buffer.camera_frame) {
       card->camera_frame_preparing = !buffer.camera_frame_ready;
       if (buffer.camera_frame_ready) repaint(*card);
@@ -893,6 +906,7 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
         updated.background_blur_radius = buffer.background_blur_radius;
         updated.glass = buffer.glass;
         updated.toplevel = true;
+        updated.overview_tag = buffer.overview_tag;
         updated.popup = buffer.popup;
         updated.focused = buffer.focused;
         updated.fullscreen = buffer.fullscreen;
@@ -980,6 +994,8 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
       }
     }
     const bool resized = updated.buffer_width != buffer.width || updated.buffer_height != buffer.height;
+    const bool full_upload = buffer.pixels != nullptr && (resized || updated.pixels.empty() || updated.texture == 0 ||
+        !updated.owns_texture || updated.shm_generation != buffer.buffer_generation);
     updated.id = buffer.surface_id;
     updated.root_id = buffer.root_surface_id;
     updated.assigned_tile_x = buffer.assigned_tile_x; updated.assigned_tile_y = buffer.assigned_tile_y;
@@ -1009,6 +1025,7 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
     updated.glass = buffer.glass;
     updated.layer_surface = buffer.layer_surface;
     updated.toplevel = buffer.toplevel;
+    updated.overview_tag = buffer.overview_tag;
     updated.popup = buffer.popup;
     updated.fullscreen = buffer.fullscreen;
     updated.suppress_geometry_animation = buffer.suppress_geometry_animation;
@@ -1030,10 +1047,10 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
     updated.content_ready = buffer.content_ready;
     updated.removed = false; updated.tag_outgoing = false;
     if (buffer.pixels != nullptr && (resized || updated.pixels.empty())) updated.pixels.resize(static_cast<std::size_t>(buffer.width) * buffer.height);
-    const int left = std::clamp(resized ? 0 : buffer.damage_x, 0, buffer.width);
-    const int top = std::clamp(resized ? 0 : buffer.damage_y, 0, buffer.height);
-    const int right = std::clamp(resized ? buffer.width : buffer.damage_x + buffer.damage_width, left, buffer.width);
-    const int bottom = std::clamp(resized ? buffer.height : buffer.damage_y + buffer.damage_height, top, buffer.height);
+    const int left = std::clamp(full_upload ? 0 : buffer.damage_x, 0, buffer.width);
+    const int top = std::clamp(full_upload ? 0 : buffer.damage_y, 0, buffer.height);
+    const int right = std::clamp(full_upload ? buffer.width : buffer.damage_x + buffer.damage_width, left, buffer.width);
+    const int bottom = std::clamp(full_upload ? buffer.height : buffer.damage_y + buffer.damage_height, top, buffer.height);
     for (int y = top; buffer.pixels != nullptr && y < bottom; ++y) {
       std::memcpy(updated.pixels.data() + static_cast<std::size_t>(y) * buffer.width + left,
                   buffer.pixels + static_cast<std::size_t>(y) * buffer.stride + left * sizeof(std::uint32_t),
@@ -1044,16 +1061,19 @@ void RuntimeBackend::present(const ShmBufferView& buffer) {
       }
     }
     if (buffer.pixels != nullptr) {
-      if (updated.texture != 0 && !updated.owns_texture) updated.texture = 0;
-      if (updated.texture == 0) glGenTextures(1, &updated.texture);
-      updated.owns_texture = true;
-      glBindTexture(GL_TEXTURE_2D, updated.texture);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-      glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, updated.buffer_width, updated.buffer_height, 0, GL_BGRA, GL_UNSIGNED_BYTE,
-                   updated.pixels.data());
-      glBindTexture(GL_TEXTURE_2D, 0);
+      updated.shm_generation = buffer.buffer_generation;
+      if (full_upload || (right > left && bottom > top)) {
+        if (updated.texture != 0 && !updated.owns_texture) updated.texture = 0;
+        if (updated.texture == 0) glGenTextures(1, &updated.texture);
+        updated.owns_texture = true;
+        glBindTexture(GL_TEXTURE_2D, updated.texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, updated.buffer_width, updated.buffer_height, 0, GL_BGRA, GL_UNSIGNED_BYTE,
+                      updated.pixels.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+      }
     } else {
       if (updated.texture != 0 && updated.owns_texture) glDeleteTextures(1, &updated.texture);
       auto& imported = device->dmabuf_textures[buffer.surface_id];
@@ -1472,7 +1492,15 @@ void RuntimeBackend::repaint(DrmOutput& card) {
   const renderer::Size physical{static_cast<std::uint32_t>(card.mode.hdisplay), static_cast<std::uint32_t>(card.mode.vdisplay)};
   const std::uint64_t now = monotonic_ms();
   frame.shader_time = static_cast<float>(now % 1000000U) / 1000.0F;
-  const auto tag = card.animations.tag_transition(now);
+  frame.overview_backdrop = card.overview;
+  frame.overview_backdrop_opacity = static_cast<float>(card.overview_progress);
+  frame.overview_backdrop_blur_radius = config_->overview_backdrop_blur_radius;
+  frame.overview_backdrop_blur_passes = config_->overview_backdrop_blur_passes;
+  if (card.overview) backend_scene::overview_scenes(frame,
+      {{card.output.logical_x, card.output.logical_y}, {card.output.logical_width, card.output.logical_height}},
+      card.overview_scroll, card.overview_active_tag, card.overview_progress, config_->background_shader, config_->overview_scene_radius,
+      config_->overview_stack_master, config_->overview_master_ratio / 100.0);
+  const auto tag = card.overview ? std::nullopt : card.animations.tag_transition(now);
   if (!tag) {
     for (auto& surface : card.shm_textures) {
       if (!surface.tag_outgoing) continue;
@@ -1548,6 +1576,16 @@ void RuntimeBackend::repaint(DrmOutput& card) {
       frame.draws.back().background_mask_texture = surface.layer_surface;
       frame.draws.back().background_mask_alpha_threshold = surface.background_blur_ignore_alpha;
       apply_blur_parameters(frame.draws.back());
+      if (card.overview && root->layer_surface) {
+        auto draw = std::move(frame.draws.back());
+        frame.draws.pop_back();
+        const renderer::Rect area{{card.output.logical_x, card.output.logical_y}, {card.output.logical_width, card.output.logical_height}};
+        for (unsigned scene = 1; scene <= 9; ++scene) {
+          auto projected = backend_scene::overview_layer(draw, area, card.overview_scroll, card.overview_active_tag, card.overview_progress, scene,
+              config_->overview_scene_radius, config_->overview_stack_master, config_->overview_master_ratio / 100.0);
+          if (backend_scene::overview_draw_visible(projected, area)) frame.draws.push_back(std::move(projected));
+        }
+      }
       continue;
     }
     renderer::Rect tag_bounds;
@@ -1620,6 +1658,8 @@ void RuntimeBackend::repaint(DrmOutput& card) {
     frame.draws.back().background_blur_radius = static_cast<float>(surface.background_blur_radius);
     apply_blur_parameters(frame.draws.back(), surface.window_shader);
     backend_scene::camera_geometry(frame.draws.back(), *root, surface, tag_bounds);
+    if (card.overview && !backend_scene::overview_draw_visible(frame.draws.back(),
+        {{card.output.logical_x, card.output.logical_y}, {card.output.logical_width, card.output.logical_height}})) frame.draws.pop_back();
   }
   if (pending_border) frame.draws.push_back(std::move(*pending_border));
   if (error_popup_visible_ && error_popup_) {

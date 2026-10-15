@@ -25,6 +25,8 @@ struct Rect {
   [[nodiscard]] bool intersects(const Rect& other) const;
 };
 
+[[nodiscard]] std::vector<Rect> uncovered_regions(Size target, const std::vector<Rect>& covered);
+
 class DamageRegion {
  public:
   void add(Rect damage);

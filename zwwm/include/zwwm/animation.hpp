@@ -22,6 +22,7 @@ struct AnimationConfig {
   std::uint32_t move_duration_ms = 0;
   std::uint32_t fade_duration_ms = 0;
   std::uint32_t tag_duration_ms = 360;
+  std::uint32_t overview_duration_ms = 280;
   std::uint32_t spring_stiffness = 200;
   std::uint32_t spring_damping = 18;
   std::uint32_t spring_mass_per_mille = 1000;

@@ -3,6 +3,7 @@
 
 #include <zwayland/server/display.hpp>
 #include <cstdint>
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -86,6 +87,12 @@ struct ShmBufferView {
   std::int8_t tag_transition_direction = 0;
   bool camera_frame = false;
   bool camera_frame_ready = false;
+  bool overview_changed = false;
+  bool overview = false;
+  std::uint32_t overview_first_tag = 0;
+  std::uint32_t overview_active_tag = 1;
+  double overview_progress = 0, overview_scroll = 0;
+  std::uint32_t overview_tag = 0;
   // Root tile and content rectangles in global logical coordinates.
   std::int32_t assigned_tile_x = 0;
   std::int32_t assigned_tile_y = 0;

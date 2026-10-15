@@ -53,6 +53,7 @@ target_link_libraries(zwwm_runtime_config PUBLIC zwayland-server PkgConfig::XKBC
 target_compile_options(zwwm_runtime_config PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_compile_definitions(zwwm_runtime_config PRIVATE
   ZWWM_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/zwwm"
+  ZWWM_SOURCE_DATA_DIR="${CMAKE_SOURCE_DIR}/zwwm/data"
 )
 add_library(zwwm::runtime_config ALIAS zwwm_runtime_config)
 
@@ -65,6 +66,7 @@ add_library(zwwm_compositor STATIC
   src/compositor_server_touch.cpp
   src/compositor_server_idle.cpp
   src/compositor_server_layer_shell.cpp
+  src/compositor_server_focus_grab.cpp
   src/compositor_server_decoration.cpp
   src/compositor_server_session_lock.cpp
   src/compositor_server_surface_extensions.cpp

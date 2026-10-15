@@ -1,5 +1,7 @@
 #include "zwwm/compositor_server.hpp"
 #include "compositor_server_internal.hpp"
+#include <zwwm-focus-grab-v1-zwayland-server.h>
+#include "zwwm/overview.hpp"
 #ifdef ZWWM_XWAYLAND
 #include "compositor_server_xwayland_internal.hpp"
 #endif
@@ -88,6 +90,10 @@ ProtocolGlobals& ProtocolGlobals::operator=(zwayland::server::Display* next) {
     viewporter = next->add_global(&protocol::wp_viewporter_interface, 1, [](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_viewporter)(&client, nullptr, bound_version, id); });
     fractional_scale_manager = next->add_global(&protocol::wp_fractional_scale_manager_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_fractional_scale_manager)(&client, data, bound_version, id); });
     layer_shell = next->add_global(&protocol::zwwm_layer_shell_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_layer_shell)(&client, data, bound_version, id); });
+    focus_grab_manager = next->add_global(&protocol::zwwm_focus_grab_manager_v1_interface, 1,
+        [seat = observer->seat](zwayland::server::Client& client, std::uint32_t version, std::uint32_t id) {
+          bind_focus_grab(&client, seat, version, id);
+        });
     zwwm_decoration_manager = next->add_global(&protocol::zwwm_decoration_manager_v1_interface, 1,
         [](zwayland::server::Client& client, std::uint32_t version, std::uint32_t id) {
           bind_zwwm_decoration_manager(&client, nullptr, version, id);
@@ -113,6 +119,7 @@ ProtocolGlobals::~ProtocolGlobals() {
     if (xwlr_layer_shell != 0) display->destroy_global(xwlr_layer_shell);
     if (layer_shell_alias != 0) display->destroy_global(layer_shell_alias);
     if (layer_shell != 0) display->destroy_global(layer_shell);
+    if (focus_grab_manager != 0) display->destroy_global(focus_grab_manager);
     if (zwwm_decoration_manager != 0) display->destroy_global(zwwm_decoration_manager);
     if (decoration_compat_manager != 0) display->destroy_global(decoration_compat_manager);
     if (virtual_keyboard_manager != 0) display->destroy_global(virtual_keyboard_manager);
@@ -1149,12 +1156,70 @@ void configure_layout(Observer* observer, XdgSurfaceState* candidate) {
   }
 #endif
 }
+std::vector<SurfaceState*> overview_roots(Observer* observer, OutputId output, int tag) {
+  std::vector<SurfaceState*> windows;
+  for (auto* surface : *observer->surfaces) {
+    if (!*surface->alive || surface->parent != nullptr) continue;
+    const auto* x = surface->xdg_surface;
+    bool included = x != nullptr && x->toplevel != nullptr && x->mapped && x->output == output && (tag == 0 || x->tag == tag);
+#ifdef ZWWM_XWAYLAND
+    const auto* role = surface->xwayland_surface;
+    included = included || (role != nullptr && role->window != nullptr && role->window->mapped && role->output == output && (tag == 0 || role->tag == tag));
+#endif
+    if (included) windows.push_back(surface);
+  }
+  const auto priority = [](const SurfaceState* surface) {
+    if (const auto* x = surface->xdg_surface; x != nullptr)
+      return portal_surface(surface) ? 40 : x->fullscreen ? 20 : x->floating ? 10 : 0;
+#ifdef ZWWM_XWAYLAND
+    if (const auto* role = surface->xwayland_surface; role != nullptr) return role->fullscreen ? 20 : role->floating ? 10 : 0;
+#endif
+    return 0;
+  };
+  std::sort(windows.begin(), windows.end(), [&](const auto* a, const auto* b) {
+    return std::pair{priority(a), a->root_order} < std::pair{priority(b), b->root_order};
+  });
+  return windows;
+}
+bool overview_projection(Observer* observer, SurfaceState* surface, renderer::Rect* source,
+                         renderer::Rect* preview, OverviewTransform* projection = nullptr) {
+  auto* top = root(surface);
+  Rect bounds{};
+  OutputId output;
+  int tag = 0;
+  if (const auto* x = top->xdg_surface; x != nullptr && x->toplevel != nullptr) {
+    bounds = x->tile_bounds; output = x->output; tag = x->tag;
+  }
+#ifdef ZWWM_XWAYLAND
+  else if (const auto* role = top->xwayland_surface; role != nullptr && role->window != nullptr) {
+    bounds = role->tile_bounds; output = role->output; tag = role->tag;
+  }
+#endif
+  else return false;
+  const auto* state = output_state(observer, output);
+  if (state == nullptr) return false;
+  *source = {{bounds.x, bounds.y}, {static_cast<unsigned>(std::max(1, bounds.width)), static_cast<unsigned>(std::max(1, bounds.height))}};
+  const auto& info = state->info;
+  const auto transform = overview_scene_transform(
+      {{info.logical_x, info.logical_y}, {info.logical_width, info.logical_height}},
+      {{info.logical_x, info.logical_y}, {info.logical_width, info.logical_height}},
+      observer->overview_scroll, tag, observer->overview_progress, state->active_tag,
+      observer->config->overview_stack_master, observer->config->overview_master_ratio / 100.0);
+  *preview = overview_project(*source, transform);
+  if (projection != nullptr) *projection = transform;
+  return true;
+}
+void refresh_overview(Observer* observer);
 void notify_surface(SurfaceState* s) {
   if (s == nullptr || s->observer == nullptr) return;
-  if (s->xdg_surface != nullptr && s->observer->toplevel_callback != nullptr) s->observer->toplevel_callback(s->observer->toplevel_data);
-  if (s->observer->event_callback != nullptr) s->observer->event_callback(
+   if (!s->observer->overview_repainting && s->xdg_surface != nullptr && s->observer->toplevel_callback != nullptr) s->observer->toplevel_callback(s->observer->toplevel_data);
+   if (!s->observer->overview_repainting && s->observer->event_callback != nullptr) s->observer->event_callback(
       s->observer->event_data, root(s)->layer_surface != nullptr ? "layer" : "window");
-  if (s->observer->callback == nullptr) return;
+   if (s->observer->callback == nullptr) return;
+   if (s->observer->overview_visible && !s->observer->overview_repainting) {
+     refresh_overview(s->observer);
+     return;
+   }
   auto* scene_root = root(s);
   if (scene_root->lock_surface != nullptr && scene_root->lock_surface->lock == nullptr) return;
   if (s->observer->seat != nullptr && s->observer->seat->session_lock != nullptr && scene_root->lock_surface == nullptr) return;
@@ -1166,20 +1231,22 @@ void notify_surface(SurfaceState* s) {
 #ifdef ZWWM_XWAYLAND
                             scene_root->xwayland_surface != nullptr ? scene_root->xwayland_surface->output :
 #endif
-                            OutputId{};
+                             OutputId{};
   if (scene_root->xdg_surface != nullptr && scene_root->xdg_surface->toplevel != nullptr &&
-      !visible_xdg(s->observer, scene_root->xdg_surface)) {
+      !s->observer->overview_visible && !visible_xdg(s->observer, scene_root->xdg_surface)) {
     s->observer->callback(s->observer->data, ShmBufferView{.surface_id = s->id,
-        .root_surface_id = scene_root->id, .output = output, .window_shader = {}, .border_shader = {}});
+        .root_surface_id = scene_root->id, .output = output, .scene_reset = s->observer->restoring_scene,
+        .window_shader = {}, .border_shader = {}});
     return;
   }
 #ifdef ZWWM_XWAYLAND
   if (scene_root->xwayland_surface != nullptr) {
     const auto* role = scene_root->xwayland_surface;
     const auto* owner = output_state(s->observer, role->output);
-    if (owner == nullptr || role->hidden || role->tag != owner->active_tag) {
+    if (owner == nullptr || (!s->observer->overview_visible && (role->hidden || role->tag != owner->active_tag))) {
       s->observer->callback(s->observer->data, ShmBufferView{.surface_id = s->id,
-          .root_surface_id = scene_root->id, .output = output, .window_shader = {}, .border_shader = {}});
+          .root_surface_id = scene_root->id, .output = output, .scene_reset = s->observer->restoring_scene,
+          .window_shader = {}, .border_shader = {}});
       return;
     }
   }
@@ -1260,6 +1327,10 @@ void notify_surface(SurfaceState* s) {
     }
   }
   view.popup = belongs_to_popup(s);
+  if (scene_root->xdg_surface != nullptr) view.overview_tag = scene_root->xdg_surface->tag;
+#ifdef ZWWM_XWAYLAND
+  else if (scene_root->xwayland_surface != nullptr) view.overview_tag = scene_root->xwayland_surface->tag;
+#endif
   view.restore_scene = s->observer->restoring_scene;
   view.unmapped = !root_mapped;
   if (scene_root->xdg_surface != nullptr && scene_root->xdg_surface->toplevel != nullptr) {
@@ -1371,6 +1442,28 @@ void notify_surface(SurfaceState* s) {
       view.window_geometry_width = s->xdg_surface->window_geometry.width;
       view.window_geometry_height = s->xdg_surface->window_geometry.height;
     }
+    if (s->observer->overview_visible) {
+      renderer::Rect source, preview;
+      OverviewTransform transform;
+      if (overview_projection(s->observer, scene_root, &source, &preview, &transform)) {
+        view.camera_scale = transform.scale;
+        view.camera_world_x = source.origin.x; view.camera_world_y = source.origin.y;
+        view.camera_offset_x = transform.x;
+        view.camera_offset_y = transform.y;
+        view.canvas_camera = true;
+        view.suppress_geometry_animation = true;
+        view.restore_scene = true;
+        view.fullscreen = false;
+        const auto* owner = output_state(s->observer, output);
+        const auto* x = scene_root->xdg_surface;
+        bool fade = x != nullptr && owner != nullptr && (x->tag != owner->active_tag || x->hidden);
+#ifdef ZWWM_XWAYLAND
+        const auto* role = scene_root->xwayland_surface;
+        fade = fade || (role != nullptr && owner != nullptr && (role->tag != owner->active_tag || role->hidden));
+#endif
+        if (fade) view.compositor_opacity *= static_cast<float>(s->observer->overview_progress);
+      }
+    }
     if (root_mapped && s->current_buffer != nullptr &&
         (s->xdg_surface == nullptr || s->xdg_surface->content_ready)
 #ifdef ZWWM_XWAYLAND
@@ -1410,6 +1503,83 @@ void notify_surface(SurfaceState* s) {
   }
   s->observer->callback(s->observer->data, view);
   s->pending_buffer_damage.clear();
+}
+void stop_overview_animation(Observer* observer) {
+  if (observer->overview_loop != nullptr && observer->overview_timer >= 0)
+    observer->overview_loop->update_timer(observer->overview_timer, 0);
+  observer->overview_motion.reset(0);
+  observer->overview_scroll_motion.reset(observer->overview_first_tag);
+  observer->overview_progress = 0;
+  observer->overview_scroll = observer->overview_first_tag;
+  observer->overview = observer->overview_visible = false;
+}
+void refresh_overview(Observer* observer) {
+  if (observer == nullptr || observer->seat == nullptr || observer->callback == nullptr || observer->overview_repainting) return;
+  if (observer->seat->session_lock != nullptr) { stop_overview_animation(observer); return; }
+  const auto now = overview_time_ms();
+  if (!observer->config->animations.enabled || observer->config->animations.overview_duration_ms == 0) {
+    observer->overview_motion.reset(observer->overview ? 1 : 0);
+    observer->overview_scroll_motion.reset(observer->overview_first_tag);
+  }
+  observer->overview_progress = observer->overview_motion.sample(now);
+  observer->overview_scroll = observer->overview_scroll_motion.sample(now);
+  observer->overview_visible = observer->overview || observer->overview_progress > 0 || observer->overview_motion.active(now);
+  observer->seat->cursor_override_shape = observer->overview_visible ? "left_ptr" : "";
+  apply_cursor_shape(observer->seat);
+  observer->overview_repainting = true;
+  observer->callback(observer->data, ShmBufferView{.output = {}, .camera_frame = true, .window_shader = {}, .border_shader = {}});
+  for (const auto& output : *observer->outputs) {
+    observer->callback(observer->data, ShmBufferView{.output = output->info.id,
+        .overview_changed = true, .overview = observer->overview_visible,
+        .overview_first_tag = static_cast<unsigned>(observer->overview_first_tag), .overview_active_tag = output->active_tag,
+        .overview_progress = observer->overview_progress, .overview_scroll = observer->overview_scroll,
+        .window_shader = {}, .border_shader = {}});
+  }
+  const bool restoring = observer->restoring_scene;
+  observer->restoring_scene = true;
+  for (auto* surface : *observer->surfaces) if (*surface->alive && surface->parent == nullptr) notify_surface_tree(surface);
+  observer->restoring_scene = restoring;
+  observer->overview_repainting = false;
+  observer->callback(observer->data, ShmBufferView{.output = {}, .camera_frame = true, .camera_frame_ready = true, .window_shader = {}, .border_shader = {}});
+  const bool animating = observer->overview_visible && (observer->overview_motion.active(now) || observer->overview_scroll_motion.active(now));
+  if (animating) {
+    if (observer->overview_loop == nullptr) observer->overview_loop = &observer->seat->display->event_loop();
+    if (observer->overview_timer < 0)
+      observer->overview_timer = observer->overview_loop->add_timer([observer] { refresh_overview(observer); });
+    observer->overview_loop->update_timer(observer->overview_timer, 8);
+  } else if (observer->overview_loop != nullptr && observer->overview_timer >= 0) {
+    observer->overview_loop->update_timer(observer->overview_timer, 0);
+  }
+}
+void update_overview(Observer* observer, bool enabled) {
+  if (observer == nullptr || observer->seat == nullptr) return;
+  const auto now = overview_time_ms();
+  const auto duration = observer->config->animations.enabled ? observer->config->animations.overview_duration_ms : 0;
+  if (enabled && !observer->overview_visible) {
+    observer->overview_scroll_motion.reset(observer->overview_first_tag);
+    auto* seat = observer->seat;
+    auto* client = seat->pointer_grab == nullptr ? nullptr : seat->pointer_grab->resource->client;
+    for (const auto button : seat->pressed_buttons) {
+      const bool consumed = std::find(seat->consumed_buttons.begin(), seat->consumed_buttons.end(), button) != seat->consumed_buttons.end();
+      if (client != nullptr && !seat->compositor_interactive && !consumed)
+        for (auto* pointer : seat->pointers) if (pointer->client == client)
+          protocol::wl_pointer_send_button(*pointer, seat->display->next_serial(), timestamp_ms(), button, protocol::WL_POINTER_BUTTON_STATE_RELEASED);
+      if (!consumed) seat->consumed_buttons.push_back(button);
+    }
+    if (client != nullptr) send_pointer_frame(seat, client);
+    seat->pressed_buttons.clear();
+    seat->pointer_grab = nullptr;
+    cancel_drag(seat);
+    cancel_touches(seat);
+  }
+  if (!enabled && observer->overview) observer->overview_scroll_motion.reset(observer->overview_scroll_motion.sample(now));
+  if (observer->overview != enabled) end_interactive(observer->seat);
+  observer->overview = enabled;
+  if (observer->overview_motion.target != (enabled ? 1 : 0) || duration == 0)
+    observer->overview_motion.retarget(enabled ? 1 : 0, now, duration);
+  if (enabled && (observer->overview_scroll_motion.target != observer->overview_first_tag || duration == 0))
+    observer->overview_scroll_motion.retarget(observer->overview_first_tag, now, duration);
+  refresh_overview(observer);
 }
 void notify_surface_tree(SurfaceState* s) {
   if (s == nullptr) return;
@@ -1612,6 +1782,7 @@ void surface_destroyed(zwayland::server::Resource* resource) {
   auto* surface = resource->data<SurfaceState>();
   if (surface == nullptr) return;
   *surface->alive = false;
+  if (surface->observer != nullptr) refresh_focus_grab(surface->observer->seat);
   if (surface->subsurface != nullptr) surface->subsurface->userdata.reset();
   const bool was_mapped = surface->xdg_surface != nullptr && surface->xdg_surface->mapped;
   for (auto* child : std::vector<SurfaceState*>(surface->children))
@@ -2491,13 +2662,16 @@ bool valid_positioner(const PositionerState& p) {
 }
 void send_pointer_frame(SeatState* seat, zwayland::server::Client* client) { for (auto* resource : seat->pointers) if (resource->client == client && resource->version >= 5) protocol::wl_pointer_send_frame(*resource); }
 void set_keyboard_focus(SeatState* seat, SurfaceState* next) {
+  if (seat != nullptr && seat->focus_grab != nullptr && !seat->focus_grab_transition &&
+      seat->session_lock == nullptr && !focus_grab_contains(seat, next)) return;
   if (seat != nullptr && seat->canvas_cluster_dragging && next != nullptr &&
       root(next) != root(seat->interactive)) return;
   if (seat != nullptr && seat->compositor_interactive && root(seat->interactive) != root(next)) end_interactive(seat);
   if (next != nullptr && root(next)->xdg_surface != nullptr && root(next)->xdg_surface->toplevel != nullptr && seat != nullptr && seat->keyboard_focus != nullptr) {
     const auto* current = root(seat->keyboard_focus);
     if (current != nullptr && *current->alive && current->layer_surface != nullptr && current->layer_surface->mapped &&
-        current->layer_surface->current.keyboard == protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) return;
+        current->layer_surface->current.keyboard == protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE &&
+        !seat->focus_grab_transition) return;
   }
   if (seat == nullptr || seat->keyboard_focus == next) return;
   if (auto* constraint = active_constraint(seat);
@@ -2529,6 +2703,8 @@ void set_keyboard_focus(SeatState* seat, SurfaceState* next) {
 }
 void refresh_layer_keyboard_focus(Observer* observer) {
   if (observer == nullptr || observer->seat == nullptr) return;
+  refresh_focus_grab(observer->seat);
+  if (observer->seat->focus_grab != nullptr) return;
   auto* output = output_state(observer, observer->active_output);
   if (output == nullptr) return;
   SurfaceState* exclusive = nullptr;
@@ -3393,6 +3569,17 @@ std::vector<LayerInfo> CompositorServer::layers() const {
 bool CompositorServer::dispatch_action(const std::string& action, const std::string& argument,
                                        std::string* error) {
   auto fail = [&](const char* message) { if (error != nullptr) *error = message; return false; };
+  if (action == "overview") {
+    if (impl_->seat_state.session_lock != nullptr) return fail("session is locked");
+    if (!argument.empty() && argument != "on" && argument != "off") return fail("overview accepts on, off, or an empty toggle argument");
+    const bool enabled = argument == "on" || (argument.empty() && !impl_->observer.overview);
+    if (enabled && !impl_->observer.overview) {
+      const auto* output = output_state(&impl_->observer, impl_->active_output);
+      impl_->observer.overview_first_tag = output == nullptr ? 0 : std::clamp(static_cast<int>(output->active_tag) - 2, 0, 6);
+    }
+    update_overview(&impl_->observer, enabled);
+    return true;
+  }
   auto& seat = impl_->seat_state;
   auto* focused = seat.toplevel_focus;
   auto* xdg = focused == nullptr ? nullptr : focused->xdg_surface;
@@ -4026,6 +4213,20 @@ bool CompositorServer::pointer_pan_motion(double dx, double dy) {
 }
 void CompositorServer::pointer_motion_global(std::uint32_t time, std::int32_t x, std::int32_t y) {
   idle_activity(&impl_->seat_state);
+  if (impl_->observer.overview_visible) {
+    impl_->seat_state.pointer_x = x; impl_->seat_state.pointer_y = y;
+    for (const auto& output : impl_->outputs) {
+      const auto& info = output->info;
+      if (x >= info.logical_x && y >= info.logical_y && x < info.logical_x + static_cast<int>(info.logical_width) &&
+          y < info.logical_y + static_cast<int>(info.logical_height)) {
+        impl_->active_output = impl_->observer.active_output = info.id;
+        break;
+      }
+    }
+    set_pointer_focus(&impl_->seat_state, nullptr, 0, 0);
+    sync_pointer_position(&impl_->seat_state);
+    return;
+  }
   auto* policy_hit = root(impl_->seat_state.pointer_grab != nullptr ? impl_->seat_state.pointer_grab :
                           surface_at_global(&impl_->observer, x, y));
   emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::motion, .time = time,
@@ -4291,6 +4492,56 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
   auto& seat = impl_->seat_state;
   if (state != protocol::WL_POINTER_BUTTON_STATE_PRESSED && state != protocol::WL_POINTER_BUTTON_STATE_RELEASED) return;
   idle_activity(&seat);
+  if (seat.focus_grab != nullptr && state == protocol::WL_POINTER_BUTTON_STATE_PRESSED &&
+      !focus_grab_contains(&seat, seat.hit_target)) {
+    dismiss_focus_grab(&seat, protocol::ZWWM_FOCUS_GRAB_V1_REASON_OUTSIDE);
+    seat.consumed_buttons.push_back(button);
+    return;
+  }
+  if (impl_->observer.overview_visible) {
+    if (state == protocol::WL_POINTER_BUTTON_STATE_PRESSED) {
+      seat.consumed_buttons.push_back(button);
+      if (button == BTN_LEFT && impl_->observer.overview && !impl_->observer.overview_motion.active(overview_time_ms())) {
+        for (const auto& output : impl_->outputs) {
+          const auto& info = output->info;
+          const auto contains = [&seat](renderer::Rect rect) {
+            return seat.pointer_x >= rect.origin.x && seat.pointer_y >= rect.origin.y &&
+                seat.pointer_x < rect.origin.x + static_cast<int>(rect.size.width) && seat.pointer_y < rect.origin.y + static_cast<int>(rect.size.height);
+          };
+          if (!contains({{info.logical_x, info.logical_y}, {info.logical_width, info.logical_height}})) continue;
+          std::uint64_t selected = 0;
+          int selected_tag = 0;
+          const auto windows = overview_roots(&impl_->observer, info.id, 0);
+          for (auto it = windows.rbegin(); it != windows.rend(); ++it) {
+            auto* surface = *it;
+            renderer::Rect source, preview;
+            if (!overview_projection(&impl_->observer, surface, &source, &preview) || !contains(preview)) continue;
+            selected = surface->id;
+            if (surface->xdg_surface != nullptr) selected_tag = surface->xdg_surface->tag;
+#ifdef ZWWM_XWAYLAND
+            else if (surface->xwayland_surface != nullptr) selected_tag = surface->xwayland_surface->tag;
+#endif
+            break;
+          }
+          for (int tag = 1; tag <= 9; ++tag) {
+            const auto card = overview_tag_rect({{info.logical_x, info.logical_y}, {info.logical_width, info.logical_height}},
+                impl_->observer.overview_scroll, tag, impl_->observer.overview_progress, output->active_tag, {},
+                impl_->config->overview_stack_master, impl_->config->overview_master_ratio / 100.0);
+            if (selected_tag != 0 ? tag != selected_tag : !contains(card)) continue;
+            impl_->active_output = impl_->observer.active_output = info.id;
+            (void)select_tag(info.id, static_cast<std::uint8_t>(tag), nullptr);
+            update_overview(&impl_->observer, false);
+            if (selected != 0) {
+              (void)control_window(selected, WindowAction::hidden, false, nullptr);
+              (void)control_window(selected, WindowAction::focus, false, nullptr);
+            }
+            return;
+          }
+        }
+      }
+    } else std::erase(seat.consumed_buttons, button);
+    return;
+  }
   auto* policy_hit = root(seat.hit_target);
   emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::button, .time = time,
       .code = button, .state = state,
@@ -4648,6 +4899,26 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
   }
 }
 void CompositorServer::pointer_axis(std::uint32_t time, std::uint32_t axis, double value, std::uint32_t source, std::int32_t discrete, std::int32_t value120, bool stop, std::uint32_t relative_direction) {
+  if (impl_->observer.overview_visible) {
+    if (!impl_->observer.overview) return;
+    if (impl_->config->overview_stack_master) return;
+    if (axis == protocol::WL_POINTER_AXIS_VERTICAL_SCROLL && !stop) {
+      double delta = value120 != 0 ? value120 / 120.0 : discrete != 0 ? discrete : value / 15.0;
+      if (source == protocol::WL_POINTER_AXIS_SOURCE_FINGER || source == protocol::WL_POINTER_AXIS_SOURCE_CONTINUOUS) {
+        const auto* output = output_state(&impl_->observer, impl_->active_output);
+        const double height = output == nullptr ? impl_->observer.output_height : output->info.logical_height;
+        delta = value / std::max(1.0, height / 3);
+      }
+      if (delta != 0) {
+        if (impl_->config->input.reverse_mouse_scrolling && source != protocol::WL_POINTER_AXIS_SOURCE_FINGER) delta = -delta;
+        impl_->observer.overview_first_tag = std::clamp(impl_->observer.overview_first_tag + delta, 0.0, 6.0);
+        if (source == protocol::WL_POINTER_AXIS_SOURCE_FINGER || source == protocol::WL_POINTER_AXIS_SOURCE_CONTINUOUS)
+          impl_->observer.overview_scroll_motion.reset(impl_->observer.overview_first_tag);
+        update_overview(&impl_->observer, true);
+      }
+    }
+    return;
+  }
   auto& seat = impl_->seat_state;
   if (value != 0.0 || discrete != 0 || value120 != 0) idle_activity(&seat);
   if (seat.session_lock == nullptr && endless_canvas(&impl_->observer) &&
@@ -4684,6 +4955,16 @@ void CompositorServer::keyboard_key(std::uint32_t time, std::uint32_t key, std::
   keyboard_key_from_source(0, time, key, state);
 }
 void CompositorServer::touch_down(std::uint32_t time, std::int32_t id, std::int32_t x, std::int32_t y) {
+  if (impl_->seat_state.focus_grab != nullptr && !focus_grab_contains(&impl_->seat_state, surface_at_global(&impl_->observer, x, y))) {
+    dismiss_focus_grab(&impl_->seat_state, protocol::ZWWM_FOCUS_GRAB_V1_REASON_OUTSIDE);
+    return;
+  }
+  if (impl_->observer.overview_visible) {
+    pointer_motion_global(time, x, y);
+    pointer_button(time, BTN_LEFT, protocol::WL_POINTER_BUTTON_STATE_PRESSED);
+    pointer_button(time, BTN_LEFT, protocol::WL_POINTER_BUTTON_STATE_RELEASED);
+    return;
+  }
   emit_policy_input(&impl_->observer, PolicyInput{.kind = PolicyInput::Kind::touch, .time = time,
       .code = static_cast<std::uint32_t>(id), .state = 1, .x = x, .y = y});
   const auto previous = impl_->active_output;
@@ -4747,6 +5028,22 @@ void CompositorServer::keyboard_key_from_source(std::uint64_t source, std::uint3
   publish_virtual_modifiers(&seat);
   if (old_group != new_group && impl_->observer.event_callback != nullptr)
     impl_->observer.event_callback(impl_->observer.event_data, "keyboard");
+  if (impl_->observer.overview_visible && state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED &&
+      (key == KEY_ESC || key == KEY_UP || key == KEY_DOWN || (key >= KEY_1 && key <= KEY_9))) {
+    seat.consumed_keys.push_back(key);
+    if (!impl_->observer.overview && key != KEY_ESC) return;
+    if (impl_->config->overview_stack_master && (key == KEY_UP || key == KEY_DOWN)) return;
+    if (key >= KEY_1 && key <= KEY_9 && impl_->observer.overview_motion.active(overview_time_ms())) return;
+    if (key == KEY_ESC) update_overview(&impl_->observer, false);
+    else if (key == KEY_UP || key == KEY_DOWN) {
+      impl_->observer.overview_first_tag = std::clamp(impl_->observer.overview_first_tag + (key == KEY_DOWN ? 1 : -1), 0.0, 6.0);
+      update_overview(&impl_->observer, true);
+    } else {
+      (void)select_tag(impl_->active_output, static_cast<std::uint8_t>(key - KEY_1 + 1), nullptr);
+      update_overview(&impl_->observer, false);
+    }
+    return;
+  }
   if (state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED && seat.session_lock == nullptr) {
     for (const auto& binding : impl_->config->keybindings) {
       if (!binding_matches(binding, seat, key)) continue;
@@ -4828,6 +5125,10 @@ void CompositorServer::keyboard_key_from_source(std::uint64_t source, std::uint3
       send_modifiers(seat);
       return;
     }
+  }
+  if (impl_->observer.overview_visible && state == protocol::WL_KEYBOARD_KEY_STATE_PRESSED) {
+    seat.consumed_keys.push_back(key);
+    return;
   }
   if (state == protocol::WL_KEYBOARD_KEY_STATE_RELEASED &&
       std::find(seat.consumed_keys.begin(), seat.consumed_keys.end(), key) != seat.consumed_keys.end()) {
