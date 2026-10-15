@@ -712,7 +712,12 @@ ValidationResult validate_config(const Config& config, std::span<const Validatio
         if (integer == nullptr || *integer < 0 || *integer > 512)
           validation_error(result.diagnostics, assignment.location, "overview.scene-radius must be 0..512");
       }
-      constexpr std::array<std::string_view, 4> fields = {"backdrop-image", "backdrop-blur-radius", "backdrop-blur-passes", "scene-radius"};
+      if (const auto* value = lookup_field(*object, "master-ratio")) {
+        const auto* integer = std::get_if<std::int64_t>(&value->data);
+        if (integer == nullptr || *integer < 10 || *integer > 90)
+          validation_error(result.diagnostics, assignment.location, "overview.master-ratio must be 10..90");
+      }
+      constexpr std::array<std::string_view, 6> fields = {"backdrop-image", "backdrop-blur-radius", "backdrop-blur-passes", "scene-radius", "layout", "master-ratio"};
       warn_unknown_fields(*object, fields, result.diagnostics, assignment.location, "overview");
       continue;
     }

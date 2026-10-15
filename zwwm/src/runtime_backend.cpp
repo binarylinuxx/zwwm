@@ -1498,7 +1498,8 @@ void RuntimeBackend::repaint(DrmOutput& card) {
   frame.overview_backdrop_blur_passes = config_->overview_backdrop_blur_passes;
   if (card.overview) backend_scene::overview_scenes(frame,
       {{card.output.logical_x, card.output.logical_y}, {card.output.logical_width, card.output.logical_height}},
-      card.overview_scroll, card.overview_active_tag, card.overview_progress, config_->background_shader, config_->overview_scene_radius);
+      card.overview_scroll, card.overview_active_tag, card.overview_progress, config_->background_shader, config_->overview_scene_radius,
+      config_->overview_stack_master, config_->overview_master_ratio / 100.0);
   const auto tag = card.overview ? std::nullopt : card.animations.tag_transition(now);
   if (!tag) {
     for (auto& surface : card.shm_textures) {
@@ -1580,7 +1581,8 @@ void RuntimeBackend::repaint(DrmOutput& card) {
         frame.draws.pop_back();
         const renderer::Rect area{{card.output.logical_x, card.output.logical_y}, {card.output.logical_width, card.output.logical_height}};
         for (unsigned scene = 1; scene <= 9; ++scene) {
-          auto projected = backend_scene::overview_layer(draw, area, card.overview_scroll, card.overview_active_tag, card.overview_progress, scene, config_->overview_scene_radius);
+          auto projected = backend_scene::overview_layer(draw, area, card.overview_scroll, card.overview_active_tag, card.overview_progress, scene,
+              config_->overview_scene_radius, config_->overview_stack_master, config_->overview_master_ratio / 100.0);
           if (backend_scene::overview_draw_visible(projected, area)) frame.draws.push_back(std::move(projected));
         }
       }

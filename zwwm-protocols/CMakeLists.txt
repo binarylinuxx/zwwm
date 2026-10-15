@@ -78,6 +78,7 @@ zwwm_add_project_protocol(zwwm-tags-unstable-v1 protocols/zwwm-tags-unstable-v1.
 zwwm_add_project_protocol(zwwm-data-control-v1 protocols/zwwm-data-control-v1.xml)
 zwwm_add_project_protocol(wlr-data-control-unstable-v1 protocols/wlr-data-control-unstable-v1.xml)
 zwwm_add_project_protocol(zwwm-layer-shell-v1 protocols/zwwm-layer-shell-v1.xml)
+zwwm_add_project_protocol(zwwm-focus-grab-v1 protocols/zwwm-focus-grab-v1.xml)
 zwwm_add_project_protocol(zwwm-decoration-manager-v1 protocols/zwwm-decoration-manager-v1.xml)
 zwwm_add_project_protocol(zwwm-virtual-keyboard-v1 protocols/zwwm-virtual-keyboard-v1.xml)
 zwwm_add_project_protocol(zwwm-window-manager-v1 protocols/zwwm-window-manager-v1.xml)

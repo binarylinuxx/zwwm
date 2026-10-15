@@ -853,6 +853,17 @@ RuntimeConfigResult compile_runtime_config(const lang::Config& parsed) {
     const auto* object = lang::as_object(item->value);
     if (object == nullptr) error(result.diagnostics, item->location, "overview must be an object");
     else {
+      if (const auto* value = lang::find_field(*object, "layout")) {
+        const auto* layout = resolved_string(*value, variables);
+        if (layout != nullptr && *layout == "vertical-strip") mutable_config->overview_stack_master = false;
+        else if (layout != nullptr && *layout == "stack-master") mutable_config->overview_stack_master = true;
+        else error(result.diagnostics, item->location, "overview.layout must be vertical-strip or stack-master");
+      }
+      if (const auto* value = lang::find_field(*object, "master-ratio")) {
+        const auto* integer = lang::as_integer(*value);
+        if (integer == nullptr || *integer < 10 || *integer > 90) error(result.diagnostics, item->location, "overview.master-ratio must be 10..90");
+        else mutable_config->overview_master_ratio = static_cast<unsigned>(*integer);
+      }
       if (const auto* value = lang::find_field(*object, "backdrop-image")) {
         const auto* path = resolved_string(*value, variables);
         if (path == nullptr) error(result.diagnostics, item->location, "overview.backdrop-image must be a string");

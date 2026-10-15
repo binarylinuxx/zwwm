@@ -186,6 +186,8 @@ class RuntimeConfig {
   std::uint32_t overview_backdrop_blur_radius = 0;
   std::uint32_t overview_backdrop_blur_passes = 3;
   std::uint32_t overview_scene_radius = 0;
+  bool overview_stack_master = false;
+  std::uint32_t overview_master_ratio = 60;
   LayoutConfig layout;
   InputConfig input;
   KeyboardConfig keyboard;

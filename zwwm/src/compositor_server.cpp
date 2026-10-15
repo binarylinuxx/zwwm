@@ -1,5 +1,6 @@
 #include "zwwm/compositor_server.hpp"
 #include "compositor_server_internal.hpp"
+#include <zwwm-focus-grab-v1-zwayland-server.h>
 #include "zwwm/overview.hpp"
 #ifdef ZWWM_XWAYLAND
 #include "compositor_server_xwayland_internal.hpp"
@@ -89,6 +90,10 @@ ProtocolGlobals& ProtocolGlobals::operator=(zwayland::server::Display* next) {
     viewporter = next->add_global(&protocol::wp_viewporter_interface, 1, [](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_viewporter)(&client, nullptr, bound_version, id); });
     fractional_scale_manager = next->add_global(&protocol::wp_fractional_scale_manager_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_fractional_scale_manager)(&client, data, bound_version, id); });
     layer_shell = next->add_global(&protocol::zwwm_layer_shell_v1_interface, 1, [data = observer](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (bind_layer_shell)(&client, data, bound_version, id); });
+    focus_grab_manager = next->add_global(&protocol::zwwm_focus_grab_manager_v1_interface, 1,
+        [seat = observer->seat](zwayland::server::Client& client, std::uint32_t version, std::uint32_t id) {
+          bind_focus_grab(&client, seat, version, id);
+        });
     zwwm_decoration_manager = next->add_global(&protocol::zwwm_decoration_manager_v1_interface, 1,
         [](zwayland::server::Client& client, std::uint32_t version, std::uint32_t id) {
           bind_zwwm_decoration_manager(&client, nullptr, version, id);
@@ -114,6 +119,7 @@ ProtocolGlobals::~ProtocolGlobals() {
     if (xwlr_layer_shell != 0) display->destroy_global(xwlr_layer_shell);
     if (layer_shell_alias != 0) display->destroy_global(layer_shell_alias);
     if (layer_shell != 0) display->destroy_global(layer_shell);
+    if (focus_grab_manager != 0) display->destroy_global(focus_grab_manager);
     if (zwwm_decoration_manager != 0) display->destroy_global(zwwm_decoration_manager);
     if (decoration_compat_manager != 0) display->destroy_global(decoration_compat_manager);
     if (virtual_keyboard_manager != 0) display->destroy_global(virtual_keyboard_manager);
@@ -1197,7 +1203,8 @@ bool overview_projection(Observer* observer, SurfaceState* surface, renderer::Re
   const auto transform = overview_scene_transform(
       {{info.logical_x, info.logical_y}, {info.logical_width, info.logical_height}},
       {{info.logical_x, info.logical_y}, {info.logical_width, info.logical_height}},
-      observer->overview_scroll, tag, observer->overview_progress, state->active_tag);
+      observer->overview_scroll, tag, observer->overview_progress, state->active_tag,
+      observer->config->overview_stack_master, observer->config->overview_master_ratio / 100.0);
   *preview = overview_project(*source, transform);
   if (projection != nullptr) *projection = transform;
   return true;
@@ -1775,6 +1782,7 @@ void surface_destroyed(zwayland::server::Resource* resource) {
   auto* surface = resource->data<SurfaceState>();
   if (surface == nullptr) return;
   *surface->alive = false;
+  if (surface->observer != nullptr) refresh_focus_grab(surface->observer->seat);
   if (surface->subsurface != nullptr) surface->subsurface->userdata.reset();
   const bool was_mapped = surface->xdg_surface != nullptr && surface->xdg_surface->mapped;
   for (auto* child : std::vector<SurfaceState*>(surface->children))
@@ -2654,13 +2662,16 @@ bool valid_positioner(const PositionerState& p) {
 }
 void send_pointer_frame(SeatState* seat, zwayland::server::Client* client) { for (auto* resource : seat->pointers) if (resource->client == client && resource->version >= 5) protocol::wl_pointer_send_frame(*resource); }
 void set_keyboard_focus(SeatState* seat, SurfaceState* next) {
+  if (seat != nullptr && seat->focus_grab != nullptr && !seat->focus_grab_transition &&
+      seat->session_lock == nullptr && !focus_grab_contains(seat, next)) return;
   if (seat != nullptr && seat->canvas_cluster_dragging && next != nullptr &&
       root(next) != root(seat->interactive)) return;
   if (seat != nullptr && seat->compositor_interactive && root(seat->interactive) != root(next)) end_interactive(seat);
   if (next != nullptr && root(next)->xdg_surface != nullptr && root(next)->xdg_surface->toplevel != nullptr && seat != nullptr && seat->keyboard_focus != nullptr) {
     const auto* current = root(seat->keyboard_focus);
     if (current != nullptr && *current->alive && current->layer_surface != nullptr && current->layer_surface->mapped &&
-        current->layer_surface->current.keyboard == protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) return;
+        current->layer_surface->current.keyboard == protocol::ZWWM_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE &&
+        !seat->focus_grab_transition) return;
   }
   if (seat == nullptr || seat->keyboard_focus == next) return;
   if (auto* constraint = active_constraint(seat);
@@ -2692,6 +2703,8 @@ void set_keyboard_focus(SeatState* seat, SurfaceState* next) {
 }
 void refresh_layer_keyboard_focus(Observer* observer) {
   if (observer == nullptr || observer->seat == nullptr) return;
+  refresh_focus_grab(observer->seat);
+  if (observer->seat->focus_grab != nullptr) return;
   auto* output = output_state(observer, observer->active_output);
   if (output == nullptr) return;
   SurfaceState* exclusive = nullptr;
@@ -4479,6 +4492,12 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
   auto& seat = impl_->seat_state;
   if (state != protocol::WL_POINTER_BUTTON_STATE_PRESSED && state != protocol::WL_POINTER_BUTTON_STATE_RELEASED) return;
   idle_activity(&seat);
+  if (seat.focus_grab != nullptr && state == protocol::WL_POINTER_BUTTON_STATE_PRESSED &&
+      !focus_grab_contains(&seat, seat.hit_target)) {
+    dismiss_focus_grab(&seat, protocol::ZWWM_FOCUS_GRAB_V1_REASON_OUTSIDE);
+    seat.consumed_buttons.push_back(button);
+    return;
+  }
   if (impl_->observer.overview_visible) {
     if (state == protocol::WL_POINTER_BUTTON_STATE_PRESSED) {
       seat.consumed_buttons.push_back(button);
@@ -4506,7 +4525,8 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
           }
           for (int tag = 1; tag <= 9; ++tag) {
             const auto card = overview_tag_rect({{info.logical_x, info.logical_y}, {info.logical_width, info.logical_height}},
-                impl_->observer.overview_scroll, tag, impl_->observer.overview_progress, output->active_tag);
+                impl_->observer.overview_scroll, tag, impl_->observer.overview_progress, output->active_tag, {},
+                impl_->config->overview_stack_master, impl_->config->overview_master_ratio / 100.0);
             if (selected_tag != 0 ? tag != selected_tag : !contains(card)) continue;
             impl_->active_output = impl_->observer.active_output = info.id;
             (void)select_tag(info.id, static_cast<std::uint8_t>(tag), nullptr);
@@ -4881,6 +4901,7 @@ void CompositorServer::pointer_button(std::uint32_t time, std::uint32_t button, 
 void CompositorServer::pointer_axis(std::uint32_t time, std::uint32_t axis, double value, std::uint32_t source, std::int32_t discrete, std::int32_t value120, bool stop, std::uint32_t relative_direction) {
   if (impl_->observer.overview_visible) {
     if (!impl_->observer.overview) return;
+    if (impl_->config->overview_stack_master) return;
     if (axis == protocol::WL_POINTER_AXIS_VERTICAL_SCROLL && !stop) {
       double delta = value120 != 0 ? value120 / 120.0 : discrete != 0 ? discrete : value / 15.0;
       if (source == protocol::WL_POINTER_AXIS_SOURCE_FINGER || source == protocol::WL_POINTER_AXIS_SOURCE_CONTINUOUS) {
@@ -4934,6 +4955,10 @@ void CompositorServer::keyboard_key(std::uint32_t time, std::uint32_t key, std::
   keyboard_key_from_source(0, time, key, state);
 }
 void CompositorServer::touch_down(std::uint32_t time, std::int32_t id, std::int32_t x, std::int32_t y) {
+  if (impl_->seat_state.focus_grab != nullptr && !focus_grab_contains(&impl_->seat_state, surface_at_global(&impl_->observer, x, y))) {
+    dismiss_focus_grab(&impl_->seat_state, protocol::ZWWM_FOCUS_GRAB_V1_REASON_OUTSIDE);
+    return;
+  }
   if (impl_->observer.overview_visible) {
     pointer_motion_global(time, x, y);
     pointer_button(time, BTN_LEFT, protocol::WL_POINTER_BUTTON_STATE_PRESSED);
@@ -5007,6 +5032,7 @@ void CompositorServer::keyboard_key_from_source(std::uint64_t source, std::uint3
       (key == KEY_ESC || key == KEY_UP || key == KEY_DOWN || (key >= KEY_1 && key <= KEY_9))) {
     seat.consumed_keys.push_back(key);
     if (!impl_->observer.overview && key != KEY_ESC) return;
+    if (impl_->config->overview_stack_master && (key == KEY_UP || key == KEY_DOWN)) return;
     if (key >= KEY_1 && key <= KEY_9 && impl_->observer.overview_motion.active(overview_time_ms())) return;
     if (key == KEY_ESC) update_overview(&impl_->observer, false);
     else if (key == KEY_UP || key == KEY_DOWN) {

@@ -158,6 +158,8 @@ int main(int argc, char** argv) {
         merged->overview_backdrop_blur_radius = current->overview_backdrop_blur_radius;
         merged->overview_backdrop_blur_passes = current->overview_backdrop_blur_passes;
         merged->overview_scene_radius = current->overview_scene_radius;
+        merged->overview_stack_master = current->overview_stack_master;
+        merged->overview_master_ratio = current->overview_master_ratio;
         config = std::move(merged);
       }
       if (!compositor->set_config(config)) return "could not apply keyboard configuration";

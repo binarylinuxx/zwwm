@@ -447,6 +447,8 @@ layout = {
 
 ```zw
 overview = {
+  layout = "stack-master" -- Or "vertical-strip" (default).
+  master-ratio = 60 -- Stack left, master right; accepts 10..90.
   backdrop-image = "/home/user/Pictures/overview-backdrop.png"
   backdrop-blur-radius = 24
   backdrop-blur-passes = 3

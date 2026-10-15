@@ -13,9 +13,10 @@
 namespace zwwm::backend_scene {
 
 inline void overview_scenes(renderer::FramePlan& frame, renderer::Rect area, double scroll, unsigned active,
-                            double progress, const std::string& background_shader, float radius = 0) {
+                            double progress, const std::string& background_shader, float radius = 0,
+                            bool stack_master = false, double master_ratio = 0.6) {
   for (unsigned tag = 1; tag <= 9; ++tag) {
-    const auto card = overview_tag_rect(area, scroll, tag, progress, active);
+    const auto card = overview_tag_rect(area, scroll, tag, progress, active, {}, stack_master, master_ratio);
     if (card.origin.y + static_cast<int>(card.size.height) <= area.origin.y ||
         card.origin.y >= area.origin.y + static_cast<int>(area.size.height)) continue;
     const float amount = std::clamp(progress, 0.0, 1.0);
@@ -65,8 +66,9 @@ inline void overview_clip(renderer::DrawCall& draw, renderer::Rect scene, float 
 }
 
 inline renderer::DrawCall overview_layer(renderer::DrawCall draw, renderer::Rect area, double scroll,
-                                         unsigned active, double progress, unsigned tag, float radius = 0) {
-  const auto transform = overview_scene_transform(area, area, scroll, tag, progress, active);
+                                         unsigned active, double progress, unsigned tag, float radius = 0,
+                                         bool stack_master = false, double master_ratio = 0.6) {
+  const auto transform = overview_scene_transform(area, area, scroll, tag, progress, active, stack_master, master_ratio);
   const auto source = draw.bounds;
   draw.bounds = overview_project(source, transform);
   draw.toplevel_bounds = draw.bounds;
@@ -77,7 +79,7 @@ inline renderer::DrawCall overview_layer(renderer::DrawCall draw, renderer::Rect
                      {source.size.width * transform.scale, source.size.height * transform.scale}};
   geometry.toplevel = geometry.bounds;
   draw.geometry = geometry;
-  overview_clip(draw, overview_tag_rect(area, scroll, tag, progress, active), radius * std::clamp(progress, 0.0, 1.0));
+  overview_clip(draw, overview_tag_rect(area, scroll, tag, progress, active, {}, stack_master, master_ratio), radius * std::clamp(progress, 0.0, 1.0));
   return draw;
 }
 

@@ -170,6 +170,7 @@ struct ProtocolGlobals {
   std::uint32_t viewporter = 0;
   std::uint32_t fractional_scale_manager = 0;
   std::uint32_t layer_shell = 0;
+  std::uint32_t focus_grab_manager = 0;
   std::uint32_t zwwm_decoration_manager = 0;
   std::uint32_t decoration_compat_manager = 0;
   std::uint32_t virtual_keyboard_manager = 0;
@@ -184,6 +185,7 @@ struct ProtocolGlobals {
   ~ProtocolGlobals();
 };
 
+struct FocusGrabState;
 struct SeatState {
   CompositorServer* compositor = nullptr;
   struct ClusterMember { std::uint64_t id = 0; CanvasBounds start; };
@@ -212,6 +214,9 @@ struct SeatState {
   SurfaceState* toplevel_focus = nullptr;
   SurfaceState* keyboard_focus = nullptr;
   SurfaceState* regular_focus = nullptr;
+  FocusGrabState* focus_grab = nullptr;
+  std::vector<FocusGrabState*> focus_grabs;
+  bool focus_grab_transition = false;
   std::vector<DataSourceState*> data_sources;
   std::vector<DataDeviceState*> data_devices;
   std::vector<DataDeviceState*> data_control_devices;
@@ -332,6 +337,11 @@ void update_overview(Observer* observer, bool enabled);
 void stop_overview_animation(Observer* observer);
 void set_pointer_focus(SeatState* seat, SurfaceState* next, std::int32_t x, std::int32_t y);
 void set_keyboard_focus(SeatState* seat, SurfaceState* next);
+void bind_focus_grab(zwayland::server::Client*, void*, std::uint32_t, std::uint32_t);
+bool focus_grab_contains(SeatState* seat, SurfaceState* surface);
+void refresh_focus_grab(SeatState* seat);
+void dismiss_focus_grab(SeatState* seat, std::uint32_t reason);
+void destroy_focus_grabs(SeatState* seat);
 OutputId surface_output(const SurfaceState* surface);
 OutputState* output_state(Observer* observer, OutputId id);
 void reorder_layer_roots(Observer* observer, OutputId output, std::uint32_t bucket);

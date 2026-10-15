@@ -15,6 +15,7 @@ Wayland protocol data packages.
 - `ext-zwwm-manager-v1`: typed compositor state, control, and event subscriptions
 - `zwwm-data-control-v1`: compositor data-control integration
 - `zwwm-layer-shell-v1`: desktop layer surfaces (replaces `zwlr_layer_shell_v1`)
+- `zwwm-focus-grab-v1`: dismissible keyboard-focus grabs for layer panels
 - `zwwm-decoration-manager-v1`: native surface decoration policy and server-side defaults
 - `zwwm-virtual-keyboard-v1`: on-screen key injection using the compositor's XKB keymap
 - `zwwm-window-manager-v1`: runtime configuration, window control, and external policy ownership
@@ -133,6 +134,13 @@ texture preparation happen before the configuration transaction is applied.
 
 `overview.scene-radius` is an integer from `0..512` logical pixels (default 0).
 It rounds overview scene backgrounds and layer-surface clipping only.
+
+`overview.layout` accepts `vertical-strip` (default) or `stack-master`.
+`stack-master` has the eight non-active scenes in a vertical stack on the left
+and the active scene as master on the right. `overview.master-ratio` accepts
+`10..90` (default 60), specifying the master's share of available width.
+Both arrangements preserve scene aspect ratio, layers, rounding, and backdrop
+effects; master/stack presents all nine scenes without strip scrolling.
 
 ### Collections
 

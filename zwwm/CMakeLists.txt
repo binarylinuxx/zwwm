@@ -66,6 +66,7 @@ add_library(zwwm_compositor STATIC
   src/compositor_server_touch.cpp
   src/compositor_server_idle.cpp
   src/compositor_server_layer_shell.cpp
+  src/compositor_server_focus_grab.cpp
   src/compositor_server_decoration.cpp
   src/compositor_server_session_lock.cpp
   src/compositor_server_surface_extensions.cpp

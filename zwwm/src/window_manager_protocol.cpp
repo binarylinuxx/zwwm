@@ -176,6 +176,11 @@ struct WindowManagerProtocol::Impl {
                       const std::string& name, std::int32_t number) {
       auto* t = draft(resource);
       if (!t->editable()) return;
+      if (name == "overview.master-ratio") {
+        if (number < 10 || number > 90) t->fail("overview.master-ratio must be 10..90");
+        else t->draft.overview_master_ratio = static_cast<unsigned>(number);
+        return;
+      }
       if (name == "overview.scene-radius") {
         if (number < 0 || number > 512) t->fail("overview.scene-radius must be 0..512");
         else t->draft.overview_scene_radius = static_cast<unsigned>(number);
@@ -217,6 +222,12 @@ struct WindowManagerProtocol::Impl {
         if (string == "by-click") t->draft.input.focus_mode = FocusMode::by_click;
         else if (string == "hover") t->draft.input.focus_mode = FocusMode::hover;
         else t->fail("input.focus-mode must be by-click or hover");
+        return;
+      }
+      if (name == "overview.layout") {
+        if (string == "vertical-strip") t->draft.overview_stack_master = false;
+        else if (string == "stack-master") t->draft.overview_stack_master = true;
+        else t->fail("overview.layout must be vertical-strip or stack-master");
         return;
       }
       if (name == "overview.backdrop-image") {

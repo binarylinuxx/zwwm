@@ -45,15 +45,32 @@ inline std::int32_t overview_coordinate(double value) {
 }
 inline renderer::Rect overview_tag_rect(renderer::Rect area, double first, int tag,
                                         double progress = 1, int active = 1,
-                                        renderer::Rect = {}) {
+                                        renderer::Rect = {}, bool stack_master = false,
+                                        double master_ratio = 0.6) {
   const double p = std::clamp(progress, 0.0, 1.0);
   const double gap = std::min(12U, std::min(area.size.width, area.size.height) / 8);
-  const double height = std::max(1.0, (area.size.height - 4 * gap) / 3);
-  const double zoom = std::min(std::max(1.0, area.size.width - 2 * gap) / std::max(1U, area.size.width),
-                              height / std::max(1U, area.size.height));
-  const double width = area.size.width * zoom;
-  const double open_x = area.origin.x + (area.size.width - width) / 2;
-  const double open_y = area.origin.y + gap + (tag - 1 - first) * (height + gap);
+  double slot_x = area.origin.x + gap, slot_y = area.origin.y + gap;
+  double slot_width = std::max(1.0, area.size.width - 2 * gap);
+  double slot_height = std::max(1.0, (area.size.height - 4 * gap) / 3);
+  if (stack_master) {
+    const double available = std::max(1.0, area.size.width - 3 * gap);
+    const double master_width = available * std::clamp(master_ratio, 0.1, 0.9);
+    const double stack_width = available - master_width;
+    if (tag == active) {
+      slot_x += stack_width + gap;
+      slot_width = master_width;
+      slot_height = std::max(1.0, area.size.height - 2 * gap);
+    } else {
+      const int index = tag < active ? tag - 1 : tag - 2;
+      slot_width = stack_width;
+      slot_height = std::max(1.0, (area.size.height - 9 * gap) / 8);
+      slot_y += index * (slot_height + gap);
+    }
+  } else slot_y += (tag - 1 - first) * (slot_height + gap);
+  const double zoom = std::min(slot_width / std::max(1U, area.size.width), slot_height / std::max(1U, area.size.height));
+  const double width = area.size.width * zoom, height = area.size.height * zoom;
+  const double open_x = slot_x + (slot_width - width) / 2;
+  const double open_y = slot_y + (slot_height - height) / 2;
   const double closed_y = area.origin.y + (tag - active) * static_cast<double>(area.size.height);
   return {{overview_coordinate(area.origin.x + (open_x - area.origin.x) * p),
            overview_coordinate(closed_y + (open_y - closed_y) * p)},
@@ -64,8 +81,9 @@ inline renderer::Rect overview_tag_rect(renderer::Rect area, double first, int t
 struct OverviewTransform { double scale = 1, x = 0, y = 0; };
 
 inline OverviewTransform overview_scene_transform(renderer::Rect area, renderer::Rect,
-                                                  double first, int tag, double progress, int active) {
-  const auto card = overview_tag_rect(area, first, tag, 1, active);
+                                                  double first, int tag, double progress, int active,
+                                                  bool stack_master = false, double master_ratio = 0.6) {
+  const auto card = overview_tag_rect(area, first, tag, 1, active, {}, stack_master, master_ratio);
   const double zoom = std::min(static_cast<double>(card.size.width) / std::max(1U, area.size.width),
                               static_cast<double>(card.size.height) / std::max(1U, area.size.height));
   const double x = card.origin.x - area.origin.x * zoom;

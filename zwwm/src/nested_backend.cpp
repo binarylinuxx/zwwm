@@ -964,7 +964,8 @@ void NestedBackend::repaint_gpu() {
   frame.overview_backdrop_blur_radius = config_->overview_backdrop_blur_radius;
   frame.overview_backdrop_blur_passes = config_->overview_backdrop_blur_passes;
   if (overview_) backend_scene::overview_scenes(frame, {{0, 0}, {logical_width_, logical_height_}},
-      overview_scroll_, overview_active_tag_, overview_progress_, config_->background_shader, config_->overview_scene_radius);
+      overview_scroll_, overview_active_tag_, overview_progress_, config_->background_shader, config_->overview_scene_radius,
+      config_->overview_stack_master, config_->overview_master_ratio / 100.0);
   std::optional<renderer::DrawCall> pending_border;
   std::uint64_t pending_border_root = 0;
   const auto apply_effect_parameters = [&](renderer::DrawCall& draw, std::string_view shader = {}) {
@@ -999,7 +1000,8 @@ void NestedBackend::repaint_gpu() {
         frame.draws.pop_back();
         const renderer::Rect area{{0, 0}, {logical_width_, logical_height_}};
         for (unsigned scene = 1; scene <= 9; ++scene) {
-          auto projected = backend_scene::overview_layer(draw, area, overview_scroll_, overview_active_tag_, overview_progress_, scene, config_->overview_scene_radius);
+          auto projected = backend_scene::overview_layer(draw, area, overview_scroll_, overview_active_tag_, overview_progress_, scene,
+              config_->overview_scene_radius, config_->overview_stack_master, config_->overview_master_ratio / 100.0);
           if (backend_scene::overview_draw_visible(projected, area)) frame.draws.push_back(std::move(projected));
         }
       }
@@ -1232,7 +1234,8 @@ void NestedBackend::repaint() {
   if (overview_) {
     renderer::FramePlan cards;
     backend_scene::overview_scenes(cards, {{0, 0}, {logical_width_, logical_height_}},
-        overview_scroll_, overview_active_tag_, overview_progress_, config_->background_shader, config_->overview_scene_radius);
+        overview_scroll_, overview_active_tag_, overview_progress_, config_->background_shader, config_->overview_scene_radius,
+        config_->overview_stack_master, config_->overview_master_ratio / 100.0);
     for (const auto& draw : cards.draws) {
       const int left = draw.bounds.origin.x, top = draw.bounds.origin.y;
       const int right = left + static_cast<int>(draw.bounds.size.width), bottom = top + static_cast<int>(draw.bounds.size.height);
@@ -1286,8 +1289,10 @@ void NestedBackend::repaint() {
       const renderer::Rect area{{0, 0}, {logical_width_, logical_height_}};
       if (overview_ && root_it->layer_surface) {
         for (unsigned scene = 1; scene <= 9; ++scene) {
-          const auto transform = overview_scene_transform(area, area, overview_scroll_, scene, overview_progress_, overview_active_tag_);
-          paint(transform, overview_tag_rect(area, overview_scroll_, scene, overview_progress_, overview_active_tag_),
+          const auto transform = overview_scene_transform(area, area, overview_scroll_, scene, overview_progress_, overview_active_tag_,
+              config_->overview_stack_master, config_->overview_master_ratio / 100.0);
+          paint(transform, overview_tag_rect(area, overview_scroll_, scene, overview_progress_, overview_active_tag_, {},
+              config_->overview_stack_master, config_->overview_master_ratio / 100.0),
                 static_cast<int>(std::lround(config_->overview_scene_radius * overview_progress_)));
         }
       } else paint({}, area);
