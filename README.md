@@ -53,6 +53,24 @@ Set `xwayland.enable = false` to select the package variant that does not
 discover or link XCB. The module installs zwwm, registers its display-manager
 session, enables graphics support, and configures the zwwm/GTK portal set.
 
+### Reusable flake components
+
+Available independently as `packages.<system>` outputs and through
+`overlays.default`:
+
+- `zwayland`: C++23 client/server/wire libraries, headers, CMake and pkg-config exports.
+- `zwayland-scanner`: standalone native C++ binding generator.
+- `zwwm-protocols`: project and upstream XML, usable with any language generator.
+
+```sh
+nix build .#zwayland .#zwayland-scanner .#zwwm-protocols
+nix run .#zwayland-scanner -- zwayland-client-header protocol.xml protocol-client.h
+```
+
+CMake exports `zwayland::client`, `zwayland::server`, and `zwayland::wire`.
+pkg-config provides `zwayland-client`, `zwayland-server`, `zwayland-wire`,
+`zwwm-protocols` (variable `pkgdatadir`), and `zwayland-scanner` (variable `scanner`).
+
 ### CMake
 
 ```sh

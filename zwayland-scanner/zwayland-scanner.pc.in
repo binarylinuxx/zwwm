@@ -1,0 +1,7 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+bindir=@CMAKE_INSTALL_FULL_BINDIR@
+scanner=${bindir}/zwayland-scanner
+
+Name: zwayland-scanner
+Description: Native C++23 Wayland binding generator
+Version: @ZWAYLAND_VERSION@

@@ -1,0 +1,10 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+libdir=@CMAKE_INSTALL_FULL_LIBDIR@
+includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+
+Name: @ZWAYLAND_PC_NAME@
+Description: Native C++23 Wayland runtime
+Version: @ZWAYLAND_VERSION@
+Requires: @ZWAYLAND_PC_REQUIRES@
+Libs: -L${libdir} -l@ZWAYLAND_PC_NAME@
+Cflags: -I${includedir}
