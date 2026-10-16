@@ -30,7 +30,7 @@ namespace protocol = zwayland::generated;
 
 namespace zwwm::detail {
 
-inline constexpr std::uint32_t kSeatVersion = 5;
+inline constexpr std::uint32_t kSeatVersion = 8;
 inline constexpr std::uint32_t kShmVersion = 1;
 
 struct SurfaceState;

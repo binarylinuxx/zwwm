@@ -4945,8 +4945,11 @@ void CompositorServer::pointer_axis(std::uint32_t time, std::uint32_t axis, doub
     protocol::wl_pointer_send_axis(*resource, time, axis, (value));
     if (resource->version >= 5) protocol::wl_pointer_send_axis_source(*resource, source);
     if (resource->version >= 5 && stop) protocol::wl_pointer_send_axis_stop(*resource, time, axis);
-    if (resource->version >= 5 && discrete != 0) protocol::wl_pointer_send_axis_discrete(*resource, axis, discrete);
-    if (resource->version >= 8 && value120 != 0) protocol::wl_pointer_send_axis_value120(*resource, axis, value120);
+    if (resource->version >= 5 && resource->version < 8 && discrete != 0) protocol::wl_pointer_send_axis_discrete(*resource, axis, discrete);
+    if (resource->version >= 8) {
+      const auto steps = value120 != 0 ? value120 : discrete * 120;
+      if (steps != 0) protocol::wl_pointer_send_axis_value120(*resource, axis, steps);
+    }
     if (resource->version >= 9) protocol::wl_pointer_send_axis_relative_direction(*resource, axis, relative_direction);
   }
   send_pointer_frame(&seat, client);

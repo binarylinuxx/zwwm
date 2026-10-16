@@ -165,7 +165,7 @@ struct PortalCapture::Impl {
     protocol::zwwm_screencopy_frame_v1_send_buffer(*resource, protocol::WL_SHM_FORMAT_XRGB8888, frame->width, frame->height, frame->width * 4U);
     protocol::zwwm_screencopy_frame_v1_send_flags(*resource, 0);
   }
-  static void canonical_frame_copy(zwayland::server::Client*, zwayland::server::Resource* resource, zwayland::server::Resource* buffer) {
+  static void canonical_frame_copy(zwayland::server::Client*, zwayland::server::Resource* resource, zwayland::server::Resource* buffer, bool with_damage = false) {
     auto* frame = resource->data<CanonicalFrame>();
     if (frame == nullptr || frame->copied || frame->terminal) {
       resource->post_error(protocol::ZWLR_SCREENCOPY_FRAME_V1_ERROR_ALREADY_USED, "frame copy already requested or terminal");
@@ -184,6 +184,8 @@ struct PortalCapture::Impl {
     }
     frame->terminal = true;
     const auto seconds = static_cast<std::uint64_t>(now.tv_sec);
+    protocol::zwlr_screencopy_frame_v1_send_flags(*resource, 0);
+    if (with_damage) protocol::zwlr_screencopy_frame_v1_send_damage(*resource, 0, 0, frame->width, frame->height);
     protocol::zwlr_screencopy_frame_v1_send_ready(*resource, static_cast<std::uint32_t>(seconds >> 32U),
                                         static_cast<std::uint32_t>(seconds), static_cast<std::uint32_t>(now.tv_nsec));
   }
@@ -197,7 +199,7 @@ struct PortalCapture::Impl {
       manager->post_error(protocol::WL_DISPLAY_ERROR_INVALID_OBJECT, "unknown output capture");
       return;
     }
-    auto* resource = client->create_resource(&protocol::zwlr_screencopy_frame_v1_interface, id, 1);
+    auto* resource = client->create_resource(&protocol::zwlr_screencopy_frame_v1_interface, id, manager->version);
     if (resource == nullptr) { client->post_no_memory(); return; }
     auto* frame = new (std::nothrow) CanonicalFrame;
     if (frame == nullptr) { resource->destroy(); client->post_no_memory(); return; }
@@ -209,6 +211,9 @@ struct PortalCapture::Impl {
   }
   void destroy(zwayland::server::Client& client, zwayland::server::Resource& resource) {
     ([](zwayland::server::Client*, zwayland::server::Resource* r) { r->destroy(); })(&client, &resource);
+  }
+  void copy_with_damage(zwayland::server::Client& client, zwayland::server::Resource& resource, zwayland::server::Resource* buffer) {
+    canonical_frame_copy(&client, &resource, buffer, true);
   }
 };
     resource->set_data(frame); resource->set_handler(protocol::zwlr_screencopy_frame_v1_handler(ZwlrScreencopyFrameV1FrameImplHandler{})); resource->set_destroy_handler([](zwayland::server::Resource& destroyed) { (canonical_frame_destroy)(&destroyed); });
@@ -226,12 +231,17 @@ struct PortalCapture::Impl {
       protocol::zwlr_screencopy_frame_v1_send_failed(*resource);
       return;
     }
+    if (frame->width == 0 || frame->height == 0) {
+      frame->terminal = true;
+      protocol::zwlr_screencopy_frame_v1_send_failed(*resource);
+      return;
+    }
     protocol::zwlr_screencopy_frame_v1_send_buffer(*resource, protocol::WL_SHM_FORMAT_XRGB8888, frame->width, frame->height, frame->width * 4U);
-    protocol::zwlr_screencopy_frame_v1_send_flags(*resource, 0);
+    if (resource->version >= 3) protocol::zwlr_screencopy_frame_v1_send_buffer_done(*resource);
   }
   static void bind_canonical_screencopy(zwayland::server::Client* client, void* data, std::uint32_t version, std::uint32_t id) {
     auto* self = static_cast<Impl*>(data);
-    auto* resource = client->create_resource(&protocol::zwlr_screencopy_manager_v1_interface, id, std::min(version, 1U));
+    auto* resource = client->create_resource(&protocol::zwlr_screencopy_manager_v1_interface, id, std::min(version, 3U));
     if (resource == nullptr) { client->post_no_memory(); return; }
     struct ZwlrScreencopyManagerV1ImplHandler {
   void capture_output(zwayland::server::Client& client, zwayland::server::Resource& resource, std::uint32_t frame, std::int32_t overlay_cursor, zwayland::server::Resource* output) {
@@ -538,7 +548,7 @@ PortalCapture::PortalCapture(zwayland::server::Display* display, zwayland::serve
   impl_->portal_client = std::move(portal_client);
   impl_->embedded_cursor = embedded_cursor;
   impl_->screencopy = display->add_global(&protocol::zwwm_screencopy_view_manager_v1_interface, 1, [data = impl_.get()](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (Impl::bind_screencopy)(&client, data, bound_version, id); });
-  impl_->canonical_screencopy = display->add_global(&protocol::zwlr_screencopy_manager_v1_interface, 1, [data = impl_.get()](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (Impl::bind_canonical_screencopy)(&client, data, bound_version, id); });
+  impl_->canonical_screencopy = display->add_global(&protocol::zwlr_screencopy_manager_v1_interface, 3, [data = impl_.get()](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (Impl::bind_canonical_screencopy)(&client, data, bound_version, id); });
   impl_->xdg_output_manager = display->add_global(&protocol::zxdg_output_manager_v1_interface, 3, [data = impl_.get()](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (Impl::bind_xdg_output_manager)(&client, data, bound_version, id); });
   impl_->toplevel_manager = display->add_global(&protocol::ext_zwwm_toplevels_v1_interface, 1, [data = impl_.get()](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (Impl::bind_toplevels)(&client, data, bound_version, id); });
   display->set_global_filter([self = impl_.get()](const zwayland::server::Client& candidate,

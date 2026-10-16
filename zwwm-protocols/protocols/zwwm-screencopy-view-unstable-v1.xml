@@ -15,11 +15,11 @@
   </copyright>
 
   <!--
-    This is deliberately the upstream wlr-screencopy v1 wire contract.  It is
+    This is deliberately the upstream wlr-screencopy v3 wire contract.  It is
     public for ordinary direct screenshot clients such as grim; the zwwm
     interfaces below provide zwwm's stream-oriented capture contract.
   -->
-  <interface name="zwlr_screencopy_manager_v1" version="1">
+  <interface name="zwlr_screencopy_manager_v1" version="3">
     <request name="capture_output">
       <arg name="frame" type="new_id" interface="zwlr_screencopy_frame_v1"/>
       <arg name="overlay_cursor" type="int"/>
@@ -37,7 +37,7 @@
     <request name="destroy" type="destructor"/>
   </interface>
 
-  <interface name="zwlr_screencopy_frame_v1" version="1">
+  <interface name="zwlr_screencopy_frame_v1" version="3">
     <request name="copy">
       <arg name="buffer" type="object" interface="wl_buffer"/>
     </request>
@@ -64,6 +64,21 @@
     </event>
     <event name="failed"/>
     <request name="destroy" type="destructor"/>
+    <request name="copy_with_damage" since="2">
+      <arg name="buffer" type="object" interface="wl_buffer"/>
+    </request>
+    <event name="damage" since="2">
+      <arg name="x" type="uint"/>
+      <arg name="y" type="uint"/>
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+    </event>
+    <event name="linux_dmabuf" since="3">
+      <arg name="format" type="uint"/>
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+    </event>
+    <event name="buffer_done" since="3"/>
   </interface>
 
   <interface name="zwwm_screencopy_view_manager_v1" version="1">
