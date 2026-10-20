@@ -156,9 +156,9 @@ Gpu::~Gpu() {
   if (device_fd_ >= 0) close(device_fd_);
 }
 
-void Gpu::initialize(dev_t device, const std::vector<Format>& formats, std::string font, unsigned size,
+void Gpu::initialize(dev_t device, const std::vector<Format>& formats, FontFamilies fonts, unsigned size,
                      unsigned weight, float text_rounding, float icon_scale) {
-  font_ = std::move(font);
+  fonts_ = std::move(fonts);
   font_weight_ = weight;
   text_rounding_ = text_rounding;
   icon_scale_ = icon_scale;
@@ -224,7 +224,7 @@ void Gpu::initialize(dev_t device, const std::vector<Format>& formats, std::stri
 void Gpu::set_font_size(unsigned size) {
   if (font_size_ == size) return;
   font_size_ = size;
-  text_renderer_.configure(font_, size, font_weight_);
+  text_renderer_.configure(fonts_, size, font_weight_);
   cell_width_ = text_renderer_.width(); cell_height_ = text_renderer_.height();
   glyphs_.clear(); atlas_cursors_.fill({}); ++atlas_generation_;
   cached_revision_ = 0;
@@ -237,20 +237,23 @@ void Gpu::resize(unsigned width, unsigned height, unsigned font_size) {
   for (auto& buffer : buffers_) buffer->retired = true;
 }
 
-void Gpu::configure(std::string font, unsigned weight, float rounding, float icon_scale,
-                     Color background, std::array<float, 4> selection) {
-  if (font != font_ || weight != font_weight_) font_size_ = 0;
-  font_ = std::move(font); font_weight_ = weight; text_rounding_ = rounding; icon_scale_ = icon_scale;
-  background_ = background; selection_color_ = selection; cached_revision_ = 0;
+void Gpu::configure(FontFamilies fonts, unsigned weight, float rounding, float icon_scale,
+                     Color background, std::array<float, 4> selection, float background_opacity) {
+  if (background_opacity < 1 && format_ != DRM_FORMAT_ARGB8888)
+    throw std::runtime_error("background opacity requires ARGB8888 DMA-BUF support");
+  if (fonts != fonts_ || weight != font_weight_) font_size_ = 0;
+  fonts_ = std::move(fonts); font_weight_ = weight; text_rounding_ = rounding; icon_scale_ = icon_scale;
+  background_ = background; selection_color_ = selection; background_opacity_ = background_opacity; cached_revision_ = 0;
 }
 
-Gpu::Glyph Gpu::glyph(const std::string& text, bool bold, bool italic, std::uint32_t rgb, bool grid, bool separator) {
+Gpu::Glyph Gpu::glyph(const std::string& text, bool bold, bool italic, std::uint32_t rgb, bool grid, bool separator, FontRole role) {
   std::string key = text;
   key.push_back('\0'); key.push_back(bold); key.push_back(italic); key.push_back(grid); key.push_back(separator);
+  key.push_back(static_cast<char>(role));
   if (auto it = glyphs_.find(key); it != glyphs_.end()) return it->second;
   std::string colored_key = key; colored_key.push_back('\1'); colored_key.append(reinterpret_cast<const char*>(&rgb), sizeof(rgb));
   if (auto it = glyphs_.find(colored_key); it != glyphs_.end()) return it->second;
-  const auto bitmap = text_renderer_.rasterize(text, bold, italic, rgb, grid, separator);
+  const auto bitmap = text_renderer_.rasterize(text, bold, italic, rgb, grid, separator, role);
   const bool color = bitmap.color;
   Glyph result{};
   if (bitmap.width > 0 && bitmap.height > 0) {
@@ -354,8 +357,9 @@ Gpu::Glyph Gpu::fit_glyph(Glyph glyph, GlyphFit fit, unsigned cells, unsigned av
     const float sx = width / reference.width, sy = height / reference.height;
     glyph.left = (glyph.left - reference.x) * sx; glyph.top = (glyph.top - reference.y) * sy;
     glyph.width *= sx; glyph.height *= sy; glyph.pixel_snap = true;
-  } else if (fit == GlyphFit::Icon) {
-    const float scale = std::min({icon_scale_, span * 0.96f / ink_width, height * 0.85f / ink_height});
+  } else if (fit == GlyphFit::Icon || fit == GlyphFit::Emoji) {
+    const float scale = fit == GlyphFit::Emoji ? std::min(width * 0.95f / ink_width, height * 0.95f / ink_height) :
+                        std::min({icon_scale_, span * 0.96f / ink_width, height * 0.85f / ink_height});
     glyph.left = std::max(0.f, std::floor((width - ink_width * scale) / 2)) - scale;
     glyph.top = std::floor((height - ink_height * scale) / 2) - scale;
     glyph.width *= scale; glyph.height *= scale;
@@ -391,9 +395,10 @@ void Gpu::build_text(Terminal& terminal) {
       if (cell.attrs.dim) { cell.fg.red /= 2; cell.fg.green /= 2; cell.fg.blue /= 2; }
       const float x = col * cell_width_, y = row * cell_height_;
       const float width = std::max(1, int(cell.width)) * cell_width_;
-      backgrounds_.push_back({x,y,width,float(cell_height_),0,0,0,0, cell.bg.red / 255.f,cell.bg.green / 255.f,cell.bg.blue / 255.f,1});
+      const float alpha = cell.bg_index == -1 && !cell.attrs.reverse ? background_opacity_ : 1.f;
+      backgrounds_.push_back({x,y,width,float(cell_height_),0,0,0,0, cell.bg.red / 255.f,cell.bg.green / 255.f,cell.bg.blue / 255.f,alpha});
       const std::uint32_t foreground = (std::uint32_t(cell.fg.red) << 16U) | (std::uint32_t(cell.fg.green) << 8U) | cell.fg.blue;
-      if (cell.attrs.underline || cell.attrs.strike) {
+      if (!cell.attrs.hidden && (cell.attrs.underline || cell.attrs.strike)) {
         const float line_y = cell.attrs.strike ? y + cell_height_ / 2 : y + cell_height_ - 2;
         backgrounds_.push_back({x,line_y,width,1,0,0,0,0,cell.fg.red / 255.f,cell.fg.green / 255.f,cell.fg.blue / 255.f,1});
       }
@@ -405,16 +410,21 @@ void Gpu::build_text(Terminal& terminal) {
       const bool icon = (character >= 0xe000 && character <= 0xf8ff) ||
                         (character >= 0xf0000 && character <= 0xffffd) ||
                         (character >= 0x100000 && character <= 0x10fffd);
+      const bool text_presentation = std::find(cell.chars.begin(), cell.chars.end(), char32_t{0xfe0e}) != cell.chars.end();
+      const bool emoji = !text_presentation && ((character >= 0x1f000 && character <= 0x1faff) ||
+        std::find(cell.chars.begin(), cell.chars.end(), char32_t{0xfe0f}) != cell.chars.end() ||
+        std::find(cell.chars.begin(), cell.chars.end(), char32_t{0x20e3}) != cell.chars.end());
       std::string cluster;
       for (const auto codepoint : cell.chars) { if (!codepoint) break; Text::append_utf8(cluster, codepoint); }
       unsigned available = cell.width;
-      if (!grid && !separator && col + cell.width < terminal.columns()) {
+      if (!grid && !separator && !emoji && col + cell.width < terminal.columns()) {
         const auto next = terminal.cell(row, col + cell.width);
         const auto next_background = next.attrs.reverse ? next.fg : next.bg;
         if ((next.chars[0] == 0 || next.chars[0] == U' ') && next.width == 1 && next_background == cell.bg) ++available;
       }
-      const auto fit = grid ? GlyphFit::Grid : separator ? GlyphFit::Separator : icon ? GlyphFit::Icon : GlyphFit::Text;
-      append_glyph(fit_glyph(glyph(cluster,cell.attrs.bold,grid ? false : cell.attrs.italic,foreground,grid,separator),fit,cell.width,available),x,y,cell.fg);
+      const auto fit = grid ? GlyphFit::Grid : separator ? GlyphFit::Separator : icon ? GlyphFit::Icon : emoji ? GlyphFit::Emoji : GlyphFit::Text;
+      const auto role = grid || separator || icon ? FontRole::Symbols : emoji ? FontRole::Emoji : FontRole::Mono;
+      append_glyph(fit_glyph(glyph(cluster,cell.attrs.bold,grid ? false : cell.attrs.italic,foreground,grid,separator,role),fit,cell.width,available),x,y,cell.fg);
     }
   }
 }
@@ -441,7 +451,8 @@ bool Gpu::draw(Terminal& terminal, zwayland::client::Proxy& surface, zwayland::c
     cached_revision_ = terminal.revision();
   }
   glBindFramebuffer(GL_FRAMEBUFFER, target->framebuffer); glViewport(0, 0, width_, height_);
-  glClearColor(background_.red / 255.f,background_.green / 255.f,background_.blue / 255.f,1); glClear(GL_COLOR_BUFFER_BIT);
+  glClearColor(background_.red / 255.f * background_opacity_,background_.green / 255.f * background_opacity_,
+               background_.blue / 255.f * background_opacity_,background_opacity_); glClear(GL_COLOR_BUFFER_BIT);
   glUseProgram(program_); glUniform2f(glGetUniformLocation(program_, "viewport"), width_, height_);
   glUniform1f(glGetUniformLocation(program_, "text_rounding"), text_rounding_);
   glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_ARRAY, atlas_);
@@ -449,8 +460,9 @@ bool Gpu::draw(Terminal& terminal, zwayland::client::Proxy& surface, zwayland::c
   glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D_ARRAY, color_atlas_);
   glUniform1i(glGetUniformLocation(program_, "color_atlas"), 1);
   glBindVertexArray(vao_); glBindBuffer(GL_ARRAY_BUFFER, instances_);
-  glEnable(GL_BLEND); glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+  glDisable(GL_BLEND);
   batch(backgrounds_, false, rebuild);
+  glEnable(GL_BLEND); glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   selection_rects_.clear();
   if (terminal.has_selection()) for (int row = 0; row < terminal.rows(); ++row) {
     const auto [first, last] = terminal.selection_range(row);
@@ -469,7 +481,7 @@ bool Gpu::draw(Terminal& terminal, zwayland::client::Proxy& surface, zwayland::c
     Instance cursor_instance{position.col * float(cell_width_), position.row * float(cell_height_), width, float(cell_height_),
                              0,0,0,0,color.red / 255.f,color.green / 255.f,color.blue / 255.f,1};
     if (style.shape == CursorShape::Block) {
-      glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZERO, GL_ZERO, GL_ONE);
+      glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ZERO, GL_ONE, GL_ZERO);
       cursor_instance.r = cursor_instance.g = cursor_instance.b = 1;
     } else if (style.shape == CursorShape::Beam) cursor_instance.width = thickness;
     else { cursor_instance.y += cell_height_ - thickness; cursor_instance.height = thickness; }

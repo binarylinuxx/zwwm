@@ -3,7 +3,13 @@
 -- import = "appearance.zw"
 
 font = {
-  family = "monospace"
+  mono = "monospace"
+  -- Empty role families use automatic variants and system font fallback.
+  bold = ""
+  italic = ""
+  bold-italic = ""
+  symbols = ""
+  emoji = ""
   size = 14
   weight = 400
 }
@@ -11,6 +17,7 @@ font = {
 rendering = {
   text-rounding-per-mille = 200
   icon-scale-per-mille = 1300
+  background-opacity-per-mille = 1000 -- 850 is 85% opaque.
 }
 
 colors = {

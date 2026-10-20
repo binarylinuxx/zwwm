@@ -58,7 +58,7 @@ in {
         type = zw.type;
         default = { };
         example = lib.literalExpression ''{
-          font = { family = "JetBrainsMono Nerd Font Mono"; size = 14; weight = 400; };
+          font = { mono = "JetBrainsMono Nerd Font Mono"; size = 14; weight = 400; };
           cursor = { shape = "beam"; blink = true; };
           colors = { red = "#e06c75"; bright-red = "#ff7a85"; };
         }'';

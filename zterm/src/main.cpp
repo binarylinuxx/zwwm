@@ -86,8 +86,8 @@ class App {
       throw std::runtime_error("zterm requires xdg-shell and linux-dmabuf v4 GPU feedback");
     start_pty();
     gpu_ = std::make_unique<Gpu>(*display_);
-    gpu_->initialize(device_, formats_, options_.font, options_.size, options_.weight, options_.text_rounding, options_.icon_scale);
-    configure_gpu();
+    gpu_->initialize(device_, formats_, options_.fonts, options_.size, options_.weight, options_.text_rounding, options_.icon_scale);
+    configure_gpu(options_);
     gpu_->released = [this] { buffer_available_ = true; };
     surface_ = display_->find_proxy(p::wl_compositor_create_surface(*display_, compositor_->id));
     surface_->set_observer([this](Proxy&, std::uint32_t opcode, Parser& parser) {
@@ -325,22 +325,23 @@ class App {
     if (scale_ != integer * 120) { scale_ = integer * 120; resize_ = true; }
   }
 
-  void configure_gpu() {
-    gpu_->configure(options_.font, options_.weight, options_.text_rounding, options_.icon_scale,
-                    options_.background, options_.selection);
+  void configure_gpu(const Options& options) {
+    gpu_->configure(options.fonts, options.weight, options.text_rounding, options.icon_scale,
+                     options.background, options.selection, options.background_opacity);
   }
 
   void reload_config() {
     reload_pending_ = false;
     try {
       auto next = reload_();
+      configure_gpu(next);
       terminal_.set_palette(next.palette);
       terminal_.set_default_colors(next.foreground, next.background);
       terminal_.set_history_limit(next.history_lines);
       terminal_.set_cursor_style(next.cursor);
       terminal_.set_input_options(next.mouse_reporting, next.alternate_scroll);
       options_ = std::move(next);
-      configure_gpu(); resize_ = true;
+      resize_ = true;
     } catch (const std::exception& error) { std::fprintf(stderr, "zterm: config reload failed: %s\n", error.what()); }
   }
 

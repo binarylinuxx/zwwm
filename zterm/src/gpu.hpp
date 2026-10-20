@@ -24,11 +24,11 @@ class Gpu {
   ~Gpu();
   Gpu(const Gpu&) = delete;
   Gpu& operator=(const Gpu&) = delete;
-  void initialize(dev_t device, const std::vector<Format>& formats, std::string font, unsigned size,
+  void initialize(dev_t device, const std::vector<Format>& formats, FontFamilies fonts, unsigned size,
                   unsigned weight = 400, float text_rounding = 0.5f, float icon_scale = 1.3f);
   void resize(unsigned width, unsigned height, unsigned font_size);
-  void configure(std::string font, unsigned weight, float rounding, float icon_scale,
-                 Color background, std::array<float, 4> selection);
+  void configure(FontFamilies fonts, unsigned weight, float rounding, float icon_scale,
+                 Color background, std::array<float, 4> selection, float background_opacity);
   bool draw(Terminal& terminal, zwayland::client::Proxy& surface,
             zwayland::client::Proxy& dmabuf, bool cursor);
   unsigned cell_width() const { return cell_width_; }
@@ -36,7 +36,7 @@ class Gpu {
   std::function<void()> released;
 
  private:
-  enum class GlyphFit { Text, Icon, Grid, Separator };
+  enum class GlyphFit { Text, Icon, Emoji, Grid, Separator };
   struct Glyph {
     float x, y, width, height, left, top, layer, sample_width, sample_height;
     bool color;
@@ -52,11 +52,12 @@ class Gpu {
   EGLDisplay egl_ = EGL_NO_DISPLAY;
   EGLContext context_ = EGL_NO_CONTEXT;
   Text text_renderer_;
-  std::string font_;
+  FontFamilies fonts_;
   unsigned font_size_ = 0, cell_width_ = 1, cell_height_ = 1;
   unsigned font_weight_ = 400;
   float text_rounding_ = 0.5f;
   float icon_scale_ = 1.3f;
+  float background_opacity_ = 1.f;
   Color background_{16,19,25};
   std::array<float, 4> selection_color_{0.22f,0.48f,0.9f,0.45f};
   unsigned width_ = 0, height_ = 0;
@@ -70,7 +71,7 @@ class Gpu {
   unsigned atlas_generation_ = 0;
   std::vector<Instance> backgrounds_, text_, selection_rects_;
   Glyph glyph(const std::string& text, bool bold, bool italic, std::uint32_t rgb,
-              bool grid = false, bool separator = false);
+              bool grid = false, bool separator = false, FontRole role = FontRole::Mono);
   Glyph fit_glyph(Glyph glyph, GlyphFit fit, unsigned cells, unsigned available) const;
   void append_glyph(const Glyph& glyph, float x, float y, Color color);
   void build_text(Terminal& terminal);

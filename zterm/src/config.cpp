@@ -17,6 +17,11 @@ namespace zterm {
 namespace lang = zwwm::lang;
 namespace {
 
+constexpr std::pair<std::string_view, std::string FontFamilies::*> font_fields[] = {
+  {"family",&FontFamilies::mono},{"mono",&FontFamilies::mono},{"bold",&FontFamilies::bold},
+  {"italic",&FontFamilies::italic},{"bold-italic",&FontFamilies::bold_italic},
+  {"symbols",&FontFamilies::symbols},{"emoji",&FontFamilies::emoji}};
+
 CursorShape cursor_shape(const std::string& name) {
   if (name == "beam" || name == "bar") return CursorShape::Beam;
   if (name == "line" || name == "underline") return CursorShape::Underline;
@@ -103,7 +108,8 @@ class Decoder {
 
   void setting(const std::string& name, const lang::Value& value) {
     if (name == "font") object(value, name, [this](const auto& key, const auto& item) {
-      if (key == "family") options_.font = string(item, "font.family");
+      const auto field = std::find_if(std::begin(font_fields), std::end(font_fields), [&](const auto& field) { return field.first == key; });
+      if (field != std::end(font_fields)) options_.fonts.*(field->second) = string(item, "font." + key, field->second != &FontFamilies::mono);
       else if (key == "size") options_.size = integer(item, "font.size", 6, 96);
       else if (key == "weight") {
         const auto resolved = resolve(item);
@@ -113,6 +119,7 @@ class Decoder {
     else if (name == "rendering") object(value, name, [this](const auto& key, const auto& item) {
       if (key == "text-rounding-per-mille") options_.text_rounding = integer(item, "rendering." + key, 0, 1000) / 1000.f;
       else if (key == "icon-scale-per-mille") options_.icon_scale = integer(item, "rendering." + key, 500, 3000) / 1000.f;
+      else if (key == "background-opacity-per-mille") options_.background_opacity = integer(item, "rendering." + key, 0, 1000) / 1000.f;
       else throw std::runtime_error("unknown rendering setting: " + key);
     });
     else if (name == "colors") object(value, name, [this](const auto& key, const auto& item) {
@@ -206,6 +213,12 @@ Options load_options(int argc, char** argv) {
   bool no_config = false;
   for (int i = 1; i < argc; ++i) {
     const std::string argument = argv[i];
+    std::string font_flag;
+    std::string FontFamilies::* font_field = nullptr;
+    for (const auto& [name, member] : font_fields) {
+      const auto flag = name == "family" ? std::string("--font") : "--font-" + std::string(name);
+      if (argument == flag || argument.starts_with(flag + "=")) { font_flag = flag; font_field = member; break; }
+    }
     const auto value = [&](const std::string& name) -> std::string {
       if (argument != name) return argument.substr(name.size() + 1);
       if (i + 1 == argc) throw std::runtime_error(name + " requires a value");
@@ -229,11 +242,11 @@ Options load_options(int argc, char** argv) {
       const bool blink = argument == "--cursor-blink";
       overrides.emplace_back([blink](Options& target) { target.cursor.blink = blink; });
     }
-    else if (argument == "--font" || argument.starts_with("--font=")) {
-      std::string family = argument == "--font" ? "" : argument.substr(7);
+    else if (font_field) {
+      std::string family = argument == font_flag ? "" : argument.substr(font_flag.size() + 1);
       while (i + 1 < argc && argv[i + 1][0] != '-') { if (!family.empty()) family += ' '; family += argv[++i]; }
       if (family.empty()) throw std::runtime_error("--font requires a font family");
-      set(&Options::font, std::move(family));
+      overrides.emplace_back([font_field, family = std::move(family)](Options& target) { target.fonts.*font_field = family; });
     } else if (argument == "--font-size" || argument.starts_with("--font-size=")) {
       const auto text = value("--font-size"); unsigned size = 0;
       const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), size);
@@ -242,6 +255,7 @@ Options load_options(int argc, char** argv) {
     } else if (argument == "--font-weight" || argument.starts_with("--font-weight=")) set(&Options::weight, Text::parse_weight(value("--font-weight")));
     else if (argument == "--text-rounding" || argument.starts_with("--text-rounding=")) set(&Options::text_rounding, number(value("--text-rounding"), 0, 1, "text rounding"));
     else if (argument == "--icon-scale" || argument.starts_with("--icon-scale=")) set(&Options::icon_scale, number(value("--icon-scale"), 0.5f, 3, "icon scale"));
+    else if (argument == "--background-opacity" || argument.starts_with("--background-opacity=")) set(&Options::background_opacity, number(value("--background-opacity"), 0, 1, "background opacity"));
     else if (argument == "--shell" || argument.starts_with("--shell=")) {
       auto shell = value("--shell"); if (shell.empty()) throw std::runtime_error("--shell requires a program");
       set(&Options::shell, std::vector<std::string>{std::move(shell)});
@@ -274,9 +288,12 @@ Options load_options(int argc, char** argv) {
 void print_help() {
   std::puts("zterm daemon\n"
             "zterm [--config FILE] [--no-config] [--standalone]\n"
-            "      [--font FAMILY] [--font-size PIXELS] [--font-weight WEIGHT]\n"
+             "      [--font FAMILY] [--font-size PIXELS] [--font-weight WEIGHT]\n"
+             "      [--font-mono FAMILY] [--font-bold FAMILY] [--font-italic FAMILY]\n"
+             "      [--font-bold-italic FAMILY] [--font-symbols FAMILY] [--font-emoji FAMILY]\n"
             "      [--text-rounding 0..1] [--icon-scale 0.5..3] [--cursor beam|line|block]\n"
-            "      [--cursor-blink|--no-cursor-blink] [--shell PROGRAM] [-e COMMAND [ARGS...]]\n"
+             "      [--background-opacity 0..1] [--cursor-blink|--no-cursor-blink]\n"
+             "      [--shell PROGRAM] [-e COMMAND [ARGS...]]\n"
             "Config: $ZTERM_CONFIG or $XDG_CONFIG_HOME/zterm/config.zw; command-line flags override it.\n"
             "Ctrl+Shift+R: reload; Ctrl+Shift+C/V: copy/paste; drag or double/triple-click: select.\n"
             "Shift-drag: select in mouse-aware applications. Wheel/trackpad: scrollback or application input.\n"

@@ -44,7 +44,7 @@ The flake also exports `packages.<system>.zwwm-no-xwayland` and a NixOS module:
             zterm = {
               enable = true;
               settings = {
-                font = { family = "JetBrainsMono Nerd Font Mono"; size = 14; };
+                font = { mono = "JetBrainsMono Nerd Font Mono"; size = 14; };
                 cursor.shape = "beam";
               };
             };

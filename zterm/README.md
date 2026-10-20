@@ -29,7 +29,7 @@ With this flake's NixOS module:
 programs.zwwm.zterm = {
   enable = true;
   settings = {
-    font = { family = "JetBrainsMono Nerd Font Mono"; size = 14; weight = 400; };
+    font = { mono = "JetBrainsMono Nerd Font Mono"; size = 14; weight = 400; };
     colors = { red = "#e06c75"; bright-red = "#ff7a85"; };
     cursor.shape = "beam";
   };
@@ -74,6 +74,33 @@ Registration is removed when the daemon exits or the compositor disconnects.
 Create `~/.config/zterm/config.zw`, or select a file with `--config FILE` or
 `ZTERM_CONFIG`. Command-line options override file settings. See
 [config.zw](config.zw) for the complete example.
+
+### Font roles and transparency
+
+```zw
+font = {
+  mono = "JetBrainsMono Nerd Font Mono"
+  symbols = "Symbols Nerd Font Mono"
+  emoji = "Noto Color Emoji"
+  size = 14
+  weight = 400
+}
+
+rendering = { background-opacity-per-mille = 850 }
+```
+
+`font.bold`, `font.italic`, and `font.bold-italic` select separate variant
+families. Empty role names use automatic variants/fallback; `font.family` is
+also accepted as an alias for `font.mono`. Cell dimensions come from the mono
+font, so role changes preserve a shared terminal grid.
+
+CLI equivalents include `--font-mono`, `--font-bold`, `--font-italic`,
+`--font-bold-italic`, `--font-symbols`, and `--font-emoji`; `--font` selects mono.
+Use `--background-opacity 0.85` for an 85%-opaque default background. Glyphs and
+application-selected background colors remain opaque; the compositor shows
+content behind transparent areas.
+
+### ANSI palette
 
 All **16 ANSI colors** can be set independently:
 

@@ -36,36 +36,46 @@ Text::~Text() {
   g_object_unref(context_); g_object_unref(map_);
 }
 
-void Text::configure(const std::string& family, unsigned size, unsigned weight) {
+void Text::configure(const FontFamilies& requested, unsigned size, unsigned weight) {
   font_options(context_, false);
   weight_ = weight;
   PangoFontFamily** families = nullptr; int count = 0;
   pango_font_map_list_families(map_, &families, &count);
-  bool available = false;
-  char** names = g_strsplit(family.c_str(), ",", -1);
-  for (char** name = names; *name; ++name) {
-    g_strstrip(*name);
-    for (const char* generic : {"monospace", "sans-serif", "sans", "serif", "system-ui", "emoji", "math", "cursive", "fantasy"})
-      if (g_ascii_strcasecmp(*name, generic) == 0) available = true;
-    for (int i = 0; i < count; ++i)
-      if (g_ascii_strcasecmp(*name, pango_font_family_get_name(families[i])) == 0) available = true;
-  }
-  g_strfreev(names); g_free(families);
-  const std::string resolved = available ? family : "monospace";
-  pango_font_description_set_family(font_, resolved.c_str());
+  std::vector<std::pair<std::string, std::string>> missing;
+  const auto resolve = [&](const std::string& family, const std::string& fallback, const std::string& role) {
+    if (family.empty()) return fallback;
+    bool available = false;
+    char** names = g_strsplit(family.c_str(), ",", -1);
+    for (char** name = names; *name; ++name) {
+      g_strstrip(*name);
+      for (const char* generic : {"monospace", "sans-serif", "sans", "serif", "system-ui", "emoji", "math", "cursive", "fantasy"})
+        if (g_ascii_strcasecmp(*name, generic) == 0) available = true;
+      for (int i = 0; i < count; ++i)
+        if (g_ascii_strcasecmp(*name, pango_font_family_get_name(families[i])) == 0) available = true;
+    }
+    g_strfreev(names);
+    if (!available) missing.emplace_back(role, family);
+    return available ? family : fallback;
+  };
+  families_.mono = resolve(requested.mono, "monospace", "mono");
+  families_.bold = resolve(requested.bold, "", "bold");
+  families_.italic = resolve(requested.italic, "", "italic");
+  families_.bold_italic = resolve(requested.bold_italic, "", "bold-italic");
+  families_.symbols = resolve(requested.symbols, "", "symbols");
+  families_.emoji = resolve(requested.emoji, "", "emoji");
+  g_free(families);
+  pango_font_description_set_family(font_, families_.mono.c_str());
   pango_font_description_set_absolute_size(font_, size * PANGO_SCALE);
   pango_font_description_set_weight(font_, static_cast<PangoWeight>(weight_));
   pango_font_description_set_style(font_, PANGO_STYLE_NORMAL);
   auto* loaded = pango_font_map_load_font(map_, context_, font_);
-  if (!loaded) throw std::runtime_error("font '" + family + "' could not be loaded and no fallback font is available");
+  if (!loaded) throw std::runtime_error("font '" + requested.mono + "' could not be loaded and no fallback font is available");
   auto* actual = pango_font_describe(loaded);
   const char* actual_family = pango_font_description_get_family(actual);
-  family_ = actual_family ? actual_family : resolved;
+  family_ = actual_family ? actual_family : families_.mono;
   pango_font_description_free(actual); g_object_unref(loaded);
-  if (!available && font_warning_ != family) {
-    std::fprintf(stderr, "zterm: font '%s' not found; falling back to '%s'\n", family.c_str(), family_.c_str());
-    font_warning_ = family;
-  }
+  for (const auto& [role, family] : missing) if (font_warnings_.insert(role + ":" + family).second)
+    std::fprintf(stderr, "zterm: font.%s '%s' not found; falling back to '%s'\n", role.c_str(), family.c_str(), family_.c_str());
   auto* metrics = pango_context_get_metrics(context_, font_, pango_language_get_default());
   baseline_ = PANGO_PIXELS_CEIL(pango_font_metrics_get_ascent(metrics));
   height_ = std::max(1, baseline_ + PANGO_PIXELS_CEIL(pango_font_metrics_get_descent(metrics)));
@@ -76,11 +86,24 @@ void Text::configure(const std::string& family, unsigned size, unsigned weight) 
   width_ = std::max(1, width); g_object_unref(layout);
 }
 
-Text::Bitmap Text::rasterize(std::string_view text, bool bold, bool italic, std::uint32_t rgb, bool grid, bool separator) {
+std::string Text::font_family(FontRole role, bool bold, bool italic) const {
+  const auto& base = bold && italic && !families_.bold_italic.empty() ? families_.bold_italic :
+                     bold && !families_.bold.empty() ? families_.bold :
+                     italic && !families_.italic.empty() ? families_.italic : families_.mono;
+  std::string family = role == FontRole::Symbols && !families_.symbols.empty() ? families_.symbols :
+                       role == FontRole::Emoji && !families_.emoji.empty() ? families_.emoji : base;
+  for (const auto* fallback : {&base, &families_.mono, &families_.symbols, &families_.emoji})
+    if (!fallback->empty() && *fallback != family) family += ", " + *fallback;
+  return family;
+}
+
+Text::Bitmap Text::rasterize(std::string_view text, bool bold, bool italic, std::uint32_t rgb, bool grid, bool separator, FontRole role) {
   const bool cell = grid || separator;
   font_options(context_, cell);
-  pango_font_description_set_weight(font_, static_cast<PangoWeight>(bold ? std::max(weight_, 700U) : weight_));
-  pango_font_description_set_style(font_, italic ? PANGO_STYLE_ITALIC : PANGO_STYLE_NORMAL);
+  const auto family = font_family(role, bold, italic);
+  pango_font_description_set_family(font_, family.c_str());
+  pango_font_description_set_weight(font_, static_cast<PangoWeight>(role == FontRole::Emoji ? 400U : bold ? std::max(weight_, 700U) : weight_));
+  pango_font_description_set_style(font_, italic && role != FontRole::Emoji ? PANGO_STYLE_ITALIC : PANGO_STYLE_NORMAL);
   auto* layout = pango_layout_new(context_);
   pango_layout_set_font_description(layout, font_);
   pango_layout_set_single_paragraph_mode(layout, TRUE);
@@ -105,7 +128,7 @@ Text::Bitmap Text::rasterize(std::string_view text, bool bold, bool italic, std:
         if (!(glyph & PANGO_GLYPH_UNKNOWN_FLAG)) continue;
         const char32_t character = glyph & ~PANGO_GLYPH_UNKNOWN_FLAG;
         if (missing_glyphs_.size() < 16 && missing_glyphs_.insert(character).second)
-          std::fprintf(stderr, "zterm: glyph U+%04X not found in '%s' or its fallback fonts\n", unsigned(character), family_.c_str());
+          std::fprintf(stderr, "zterm: glyph U+%04X not found in '%s' or its fallback fonts\n", unsigned(character), family.c_str());
       }
     } while (pango_layout_iter_next_run(iter));
     pango_layout_iter_free(iter);
