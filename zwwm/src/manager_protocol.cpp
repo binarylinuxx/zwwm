@@ -80,7 +80,7 @@ struct ManagerProtocol::Impl {
 
   void send_snapshot(zwayland::server::Resource* resource, std::uint32_t type) {
     if (type == protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_STATUS) {
-      protocol::ext_zwwm_snapshot_v1_send_status(*resource, 6, compositor->outputs().size(),
+      protocol::ext_zwwm_snapshot_v1_send_status(*resource, protocol::ext_zwwm_manager_v1_interface.version, compositor->outputs().size(),
                                         compositor->toplevels().size(), compositor->layers().size());
     } else if (type == protocol::EXT_ZWWM_MANAGER_V1_SNAPSHOT_TYPE_OUTPUTS) {
       for (const auto& output : compositor->outputs()) {
@@ -247,7 +247,7 @@ struct ManagerProtocol::Impl {
   };
   static void bind(zwayland::server::Client* client, void* data, std::uint32_t version, std::uint32_t id) {
     auto* self = static_cast<Impl*>(data);
-    auto* resource = client->create_resource(&protocol::ext_zwwm_manager_v1_interface, id, std::min(version, 6U));
+    auto* resource = client->create_resource(&protocol::ext_zwwm_manager_v1_interface, id, std::min(version, protocol::ext_zwwm_manager_v1_interface.version));
     if (resource == nullptr) { client->post_no_memory(); return; }
     resource->set_data(self);
     resource->set_handler(protocol::ext_zwwm_manager_v1_handler(ManagerHandler{}));
@@ -263,7 +263,7 @@ ManagerProtocol::ManagerProtocol(zwayland::server::Display* display, CompositorS
   impl_->reload = std::move(reload);
   impl_->rebuild_shaders = std::move(rebuild_shaders);
   impl_->set_cursor = std::move(set_cursor);
-  impl_->global = display->add_global(&protocol::ext_zwwm_manager_v1_interface, 6, [data = impl_](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (Impl::bind)(&client, data, bound_version, id); });
+  impl_->global = display->add_global(&protocol::ext_zwwm_manager_v1_interface, protocol::ext_zwwm_manager_v1_interface.version, [data = impl_](zwayland::server::Client& client, std::uint32_t bound_version, std::uint32_t id) { (Impl::bind)(&client, data, bound_version, id); });
   if (impl_->global == 0) { delete impl_; throw std::runtime_error("could not create manager protocol global"); }
   compositor->set_event_observer([](void* data, const char* event) {
     if (event != nullptr) static_cast<ManagerProtocol*>(data)->emit(event);

@@ -1,0 +1,9 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+libdir=@CMAKE_INSTALL_FULL_LIBDIR@
+includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+
+Name: zw-lang
+Description: Native zw configuration parser
+Version: @ZW_LANG_VERSION@
+Libs: -L${libdir} -lzw_lang
+Cflags: -I${includedir}

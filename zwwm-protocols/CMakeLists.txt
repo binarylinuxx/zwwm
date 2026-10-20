@@ -95,6 +95,8 @@ zwwm_add_project_protocol(xwlr-layer-shell-v1 protocols/xwlr-layer-shell-v1.xml)
 zwwm_add_project_protocol(zwwm-screencopy-view-unstable-v1 protocols/zwwm-screencopy-view-unstable-v1.xml)
 zwwm_add_project_protocol(ext-zwwm-toplevels-unstable-v1 protocols/ext-zwwm-toplevels-unstable-v1.xml)
 zwwm_add_project_protocol(ext-zwwm-manager-v1 protocols/ext-zwwm-manager-v1.xml)
+zwwm_add_project_protocol(zwwm-client-connection-v1 protocols/zwwm-client-connection-v1.xml)
+install(FILES protocols/zwwm-client-connection-v1.xml DESTINATION "${CMAKE_INSTALL_DATADIR}/zwwm/protocols")
 zwwm_add_project_protocol(xwayland-shell protocols/zwwm_xwayland_shell.xml)
 
 add_custom_target(zwwm_protocol_headers DEPENDS ${ZWWW_PROTOCOL_HEADERS})

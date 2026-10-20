@@ -127,6 +127,7 @@ protocol_specs = [
   ['zwwm-screencopy-view-unstable-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-screencopy-view-unstable-v1.xml')],
   ['ext-zwwm-toplevels-unstable-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/ext-zwwm-toplevels-unstable-v1.xml')],
   ['ext-zwwm-manager-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/ext-zwwm-manager-v1.xml')],
+  ['zwwm-client-connection-v1', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm-client-connection-v1.xml')],
   ['xwayland-shell', join_paths(meson.project_source_root(), 'zwwm-protocols/protocols/zwwm_xwayland_shell.xml')],
 ]
 
@@ -382,6 +383,7 @@ zwwm = executable(
     'zwwm/src/plugin_loader.cpp',
     'zwwm/src/error_popup.cpp',
     'zwwm/src/manager_protocol.cpp',
+    'zwwm/src/client_connection_protocol.cpp',
     'zwwm/src/window_manager_protocol.cpp',
     'zwwm/src/layout_manager_protocol.cpp',
     'zwwm/src/nested_backend.cpp',
@@ -473,6 +475,7 @@ install_data(
 install_data('zwwm/data/zwwm.desktop', install_dir: get_option('datadir') / 'wayland-sessions')
 install_headers('zwwm/include/zwwm/plugin.hpp', subdir: 'zwwm')
 install_data('zwwm-protocols/protocols/zwwm-layer-shell-v1.xml',
+  'zwwm-protocols/protocols/zwwm-client-connection-v1.xml',
   'zwwm-protocols/protocols/xwlr-layer-shell-v1.xml',
   'zwwm-protocols/protocols/zwwm-decoration-manager-v1.xml',
   'zwwm-protocols/protocols/zwwm-virtual-keyboard-v1.xml',

@@ -1,5 +1,6 @@
 #include "zwwm/compositor_server.hpp"
 #include "zwwm/manager_protocol.hpp"
+#include "zwwm/client_connection_protocol.hpp"
 #include "zwwm/window_manager_protocol.hpp"
 #include "zwwm/layout_manager_protocol.hpp"
 #include "zwwm/nested_backend.hpp"
@@ -221,6 +222,7 @@ int main(int argc, char** argv) {
     if (!config_reloader->start()) std::fprintf(stderr, "zwwm: %s\n", config_reloader->last_error().c_str());
   }
   std::unique_ptr<zwwm::ManagerProtocol> manager_protocol;
+  auto client_connections = std::make_unique<zwwm::ClientConnectionProtocol>(display);
   std::unique_ptr<zwwm::WindowManagerProtocol> window_manager_protocol;
   std::unique_ptr<zwwm::LayoutManagerProtocol> layout_manager_protocol;
   try {

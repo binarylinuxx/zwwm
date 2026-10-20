@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="zwwm_client_connection_v1">
+  <copyright>Copyright 2026 binarylinuxx</copyright>
+
+  <interface name="zwwm_client_connection_manager_v1" version="1">
+    <description summary="native client connections and daemon discovery">
+      Brokers client launch sockets and named daemon channels through the
+      compositor Wayland connection. Daemon names are scoped to this compositor.
+    </description>
+    <enum name="failure">
+      <entry name="unavailable" value="0"/>
+      <entry name="already_registered" value="1"/>
+      <entry name="invalid_name" value="2"/>
+      <entry name="connection_failed" value="3"/>
+    </enum>
+    <request name="destroy" type="destructor"/>
+    <request name="create_connection">
+      <arg name="id" type="new_id" interface="zwwm_client_connection_v1"/>
+    </request>
+    <request name="register_daemon">
+      <arg name="id" type="new_id" interface="zwwm_client_daemon_v1"/>
+      <arg name="name" type="string"/>
+    </request>
+    <request name="connect_daemon">
+      <arg name="id" type="new_id" interface="zwwm_client_connection_v1"/>
+      <arg name="name" type="string"/>
+    </request>
+  </interface>
+
+  <interface name="zwwm_client_connection_v1" version="1">
+    <description summary="one prepared client or daemon connection">
+      create_connection supplies a preconnected Wayland socket suitable for
+      WAYLAND_SOCKET. connect_daemon supplies an opaque stream socket paired
+      with the named daemon; the client and daemon define its message format.
+      Exactly one connected or failed event is sent. The receiver owns the fd.
+      Handed-off sockets remain valid independently of this object.
+    </description>
+    <request name="destroy" type="destructor"/>
+    <event name="connected"><arg name="socket" type="fd"/></event>
+    <event name="failed">
+      <arg name="reason" type="uint" enum="zwwm_client_connection_manager_v1.failure"/>
+      <arg name="message" type="string"/>
+    </event>
+  </interface>
+
+  <interface name="zwwm_client_daemon_v1" version="1">
+    <description summary="a named client daemon registered with zwwm">
+      ready confirms registration. connection delivers one endpoint of a
+      newly connected client's stream. The daemon owns the received fd.
+      Names contain 1..128 ASCII letters, digits, dots, underscores or hyphens.
+      Destroying the object or disconnecting unregisters the name; existing
+      handed-off channels remain valid. Failed registrations reserve no name.
+    </description>
+    <request name="destroy" type="destructor"/>
+    <event name="ready"/>
+    <event name="failed">
+      <arg name="reason" type="uint" enum="zwwm_client_connection_manager_v1.failure"/>
+      <arg name="message" type="string"/>
+    </event>
+    <event name="connection"><arg name="socket" type="fd"/></event>
+  </interface>
+</protocol>

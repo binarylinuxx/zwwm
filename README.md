@@ -41,6 +41,13 @@ The flake also exports `packages.<system>.zwwm-no-xwayland` and a NixOS module:
           programs.zwwm = {
             enable = true;
             xwayland.enable = true;
+            zterm = {
+              enable = true;
+              settings = {
+                font = { family = "JetBrainsMono Nerd Font Mono"; size = 14; };
+                cursor.shape = "beam";
+              };
+            };
           };
         }
       ];
@@ -52,6 +59,8 @@ The flake also exports `packages.<system>.zwwm-no-xwayland` and a NixOS module:
 Set `xwayland.enable = false` to select the package variant that does not
 discover or link XCB. The module installs zwwm, registers its display-manager
 session, enables graphics support, and configures the zwwm/GTK portal set.
+`programs.zwwm.settings` and `programs.zwwm.zterm.settings` accept recursive native
+`.zw` settings; `extraConfig` on either option appends literal `.zw` configuration.
 
 ### Reusable flake components
 
@@ -159,6 +168,31 @@ zwwmctl setcursor "Bibata-Modern-Classic" 24
 See `CONFIG.md` for user shader paths, the atomic rebuild behavior, and the
 complete GLSL interface.
 
+## Community Projects
+
+### [Just Enough Shell (JES)](https://github.com/ORFLEM/just_enough_shell)
+
+A modular Wayland desktop shell with native zwwm support, a panel, launcher,
+widgets, notifications, and a lock screen. Its plugin system supports additional
+compositors and shell extensions.
+
+Latest published screenshot — lock screen:
+
+[![Just Enough Shell lock screen](https://raw.githubusercontent.com/ORFLEM/dots/main/images/10.webp)](https://github.com/ORFLEM/just_enough_shell)
+
+[Desktop preview](https://raw.githubusercontent.com/ORFLEM/dots/main/images/7.webp)
+· [Screenshot gallery](https://github.com/ORFLEM/just_enough_shell/blob/main/documentation/eng.md)
+
+### [blxshell / dots](https://github.com/binarylinuxx/dots)
+
+A Material You desktop shell built with Quickshell, featuring wallpaper-derived
+colors, a panel, launcher, notifications, and a lock screen. Its native zwwm
+plugin integrates tags, window state, workspace switching, and taskbar activation.
+
+Latest repository screenshot:
+
+[![blxshell desktop with zwwm integration](https://raw.githubusercontent.com/binarylinuxx/dots/main/20261011_10h30m37s_grim.png)](https://github.com/binarylinuxx/dots)
+
 ## Components
 
 - `zwwm/`: compositor, backends, input, layout, and Xwayland integration
@@ -167,6 +201,7 @@ complete GLSL interface.
 - `zwayland-scanner/`: C++ XML-to-Wayland binding generator
 - `zwwm-protocols/`: standard and project protocol XML plus generated bindings
 - `zw-lang/`: configuration parser and validation library
+- [`zterm/`](zterm/README.md): Wayland-native GPU terminal with native zwwm integration
 - `xdg-desktop-portal-zwwm/`: desktop portal
 - `zwwmctl/`: `ext-zwwm-manager-v1` Wayland command-line client
 

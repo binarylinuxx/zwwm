@@ -16,6 +16,15 @@
         zwayland = final.callPackage ./nix/zwayland.nix {
           stdenv = final.clangStdenv;
         };
+        zterm = final.callPackage ./nix/zterm.nix {
+          stdenv = final.clangStdenv;
+        };
+        libzterm = final.callPackage ./nix/libzterm.nix {
+          stdenv = final.clangStdenv;
+        };
+        zw-lang = final.callPackage ./nix/zw-lang.nix {
+          stdenv = final.clangStdenv;
+        };
       };
 
       packages = forAllSystems (system:
@@ -29,27 +38,22 @@
               wrapQtAppsHook = pkgs.qt6.wrapQtAppsHook;
             };
         in {
-          inherit (pkgs) zwayland zwayland-scanner zwwm-protocols;
+          inherit (pkgs) zwayland zwayland-scanner zwwm-protocols zterm libzterm zw-lang;
           default = mkZwwm { };
           zwwm = mkZwwm { };
           zwwm-no-xwayland = mkZwwm { xwayland = false; };
         });
 
       apps = forAllSystems (system: {
+        zterm = {
+          type = "app";
+          program = "${self.packages.${system}.zterm}/bin/zterm";
+        };
         zwayland-scanner = {
           type = "app";
           program = "${self.packages.${system}.zwayland-scanner}/bin/zwayland-scanner";
         };
       });
-
-      checks = forAllSystems (system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system}.extend self.overlays.default;
-        in {
-          component-consumer = pkgs.callPackage ./nix/checks/component-consumer.nix {
-            stdenv = pkgs.clangStdenv;
-          };
-        });
 
       nixosModules.default = import ./nix/module.nix { inherit self; };
       nixosModules.zwwm = self.nixosModules.default;

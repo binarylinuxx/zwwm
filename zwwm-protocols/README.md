@@ -13,6 +13,7 @@ Wayland protocol data packages.
 - `zwwm-screencopy-view-unstable-v1`: authenticated output and region capture
 - `ext-zwwm-toplevels-unstable-v1`: authenticated toplevel inventory and capture
 - `ext-zwwm-manager-v1`: typed compositor state, control, and event subscriptions
+- `zwwm-client-connection-v1`: preconnected client sockets and named daemon channels
 - `zwwm-data-control-v1`: compositor data-control integration
 - `zwwm-layer-shell-v1`: desktop layer surfaces (replaces `zwlr_layer_shell_v1`)
 - `zwwm-focus-grab-v1`: dismissible keyboard-focus grabs for layer panels

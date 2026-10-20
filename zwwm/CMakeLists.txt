@@ -88,6 +88,7 @@ add_executable(zwwm src/main.cpp src/plugin_loader.cpp src/error_popup.cpp src/m
 target_sources(zwwm PRIVATE src/nested_backend_touch.cpp)
 target_sources(zwwm PRIVATE src/window_manager_protocol.cpp)
 target_sources(zwwm PRIVATE src/layout_manager_protocol.cpp)
+target_sources(zwwm PRIVATE src/client_connection_protocol.cpp)
 target_include_directories(zwwm PRIVATE include)
 target_link_libraries(zwwm PRIVATE
   zwayland-server

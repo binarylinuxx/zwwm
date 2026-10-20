@@ -10,7 +10,7 @@ install -m 0644 "$root/xdg-desktop-portal-zwwm/data/zwwm.portal" "$portal_dir/zw
 install -m 0644 "$root/xdg-desktop-portal-zwwm/data/zwwm-gtk.portal" "$portal_dir/zwwm-gtk.portal"
 install -m 0644 "$root/xdg-desktop-portal-zwwm/data/zwwm-portals.conf" "$portal_root/zwwm-portals.conf"
 
-ZWWM_CONFIG="${ZWWM_CONFIG:-$HOME/pywm/config.zw}"
+ZWWM_CONFIG="$root/zwwm/data/config.zw"
 
 session=(env -u WAYLAND_DISPLAY -u WAYLAND_DEBUG
   XDG_CURRENT_DESKTOP=zwwm
@@ -19,9 +19,16 @@ session=(env -u WAYLAND_DISPLAY -u WAYLAND_DEBUG
   NIX_XDG_DESKTOP_PORTAL_DIR="$portal_dir"
   ZWWM_CONFIG="$ZWWM_CONFIG"
   nix develop "$root" --no-write-lock-file --command
-  env NIX_XDG_DESKTOP_PORTAL_DIR="$portal_dir"
-  "$root/build-meson/zwwm"
-  --portal-helper "$root/build-meson/xdg-desktop-portal-zwwm")
+  bash -c '
+    root=$1
+    shift
+    if [[ ! -f "$root/build-meson/build.ninja" ]]; then
+      CC=clang CXX=clang++ meson setup "$root/build-meson" "$root" --buildtype=release
+    fi
+    meson compile -C "$root/build-meson" zwwm xdg-desktop-portal-zwwm
+    exec "$root/build-meson/zwwm" \
+      --portal-helper "$root/build-meson/xdg-desktop-portal-zwwm" "$@"
+  ' zwwm-launch "$root" "$@")
 
 if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && ! -S "${XDG_RUNTIME_DIR:-}/bus" ]] &&
    command -v dbus-run-session >/dev/null 2>&1; then

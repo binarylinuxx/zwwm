@@ -1,0 +1,9 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+libdir=@CMAKE_INSTALL_FULL_LIBDIR@
+includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+
+Name: libzterm
+Description: Native zterm terminal state and VT protocol engine
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lzterm
+Cflags: -I${includedir}

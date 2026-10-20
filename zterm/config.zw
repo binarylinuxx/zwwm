@@ -1,0 +1,53 @@
+-- ~/.config/zterm/config.zw; reload with Ctrl+Shift+R.
+-- Imports and uppercase variables use the same parser as zwwm.
+-- import = "appearance.zw"
+
+font = {
+  family = "monospace"
+  size = 14
+  weight = 400
+}
+
+rendering = {
+  text-rounding-per-mille = 200
+  icon-scale-per-mille = 1300
+}
+
+colors = {
+  foreground = "#dce1e8"
+  background = "#101319"
+  selection = "#387ae673"
+
+  -- ANSI colors 0..7.
+  black = "#000000"
+  red = "#cd0000"
+  green = "#00cd00"
+  yellow = "#cdcd00"
+  blue = "#0000ee"
+  magenta = "#cd00cd"
+  cyan = "#00cdcd"
+  white = "#e5e5e5"
+
+  -- ANSI colors 8..15.
+  bright-black = "#7f7f7f"
+  bright-red = "#ff0000"
+  bright-green = "#00ff00"
+  bright-yellow = "#ffff00"
+  bright-blue = "#5c5cff"
+  bright-magenta = "#ff00ff"
+  bright-cyan = "#00ffff"
+  bright-white = "#ffffff"
+}
+
+-- Empty uses your account's login shell. Explicit example: ["fish", "--login"].
+shell = []
+cursor = { shape = "beam" blink = true } -- "line" is an underline; "block" is also supported.
+input = {
+  mouse-reporting = true
+  alternate-scroll = true
+  scroll-lines = 3
+  touchpad-scroll-per-mille = 1000
+}
+scrollback-lines = 10000
+standalone = false
+window = { width = 960 height = 600 }
