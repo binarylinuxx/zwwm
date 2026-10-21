@@ -29,6 +29,9 @@ class Gpu {
   void resize(unsigned width, unsigned height, unsigned font_size);
   void configure(FontFamilies fonts, unsigned weight, float rounding, float icon_scale,
                  Color background, std::array<float, 4> selection, float background_opacity);
+  void make_current();
+  void warm(zwayland::client::Proxy& dmabuf);
+  void detach();
   bool draw(Terminal& terminal, zwayland::client::Proxy& surface,
             zwayland::client::Proxy& dmabuf, bool cursor);
   unsigned cell_width() const { return cell_width_; }

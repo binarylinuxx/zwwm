@@ -3,13 +3,13 @@
 #endif
 
 #include "connection.hpp"
+#include "session.hpp"
 #include <zwwm-client-connection-v1-zwayland-client.h>
 #include <zwayland/wire/connection.hpp>
 #include <zwayland/wire/message.hpp>
 
 #include <poll.h>
 #include <signal.h>
-#include <spawn.h>
 #include <sys/signalfd.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -24,6 +24,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <filesystem>
 
 extern char** environ;
 
@@ -52,72 +53,73 @@ std::vector<std::string> strings(std::span<const std::byte> bytes, size_t limit)
   return result;
 }
 
-struct Spawn {
-  posix_spawn_file_actions_t files{};
-  posix_spawnattr_t attributes{};
-  Spawn() {
-    if (posix_spawn_file_actions_init(&files) != 0) throw std::runtime_error("cannot initialize client launch");
-    if (posix_spawnattr_init(&attributes) != 0) {
-      posix_spawn_file_actions_destroy(&files); throw std::runtime_error("cannot initialize client attributes");
+Options options(std::vector<std::string>& arguments) {
+  std::vector<char*> argv;
+  for (auto& argument : arguments) argv.push_back(argument.data());
+  return load_options(argv.size(), argv.data());
+}
+
+Options defaults() { std::vector<std::string> arguments{"zterm"}; return options(arguments); }
+
+struct Runtime {
+  struct Window { std::uint32_t id; std::unique_ptr<Session> session; };
+  std::list<Window> windows;
+  std::unique_ptr<Session> spare;
+  std::uint32_t next_id = 1;
+
+  void warm() { spare = prepare_session(defaults()); }
+  void recycle() {
+    for (auto it = windows.begin(); it != windows.end();) {
+      if (it->session->running()) { ++it; continue; }
+      it->session->retire();
+      if (it->session->healthy()) spare = std::move(it->session);
+      it = windows.erase(it);
     }
   }
-  ~Spawn() { posix_spawn_file_actions_destroy(&files); posix_spawnattr_destroy(&attributes); }
 };
 
-pid_t launch(ClientConnection& broker, Parser& parser) {
+std::uint32_t launch(Runtime& runtime, Parser& parser) {
   // Open request: wire object 1/opcode 0, cwd string, NUL-separated argv array,
-  // and an optional NUL-separated environment array. Reply: pid uint, error string.
+  // and an optional NUL-separated environment array. Reply: window id, error string.
   const std::string directory(parser.read_string());
   auto arguments = strings(parser.read_array(), 256);
   auto environment = parser.at_end() ? std::vector<std::string>{} : strings(parser.read_array(), 1024);
   if (!parser.at_end() || directory.empty() || directory.front() != '/' || directory.find('\0') != std::string::npos)
     throw std::runtime_error("daemon launch requires an absolute working directory");
   if (!arguments.empty() && arguments.front() == "daemon") throw std::runtime_error("nested daemon launch is not supported");
-  auto socket = broker.create_wayland();
-  Spawn spawn;
-  int error = posix_spawn_file_actions_adddup2(&spawn.files, socket.get(), 3);
-  if (!error) error = posix_spawn_file_actions_addchdir_np(&spawn.files, directory.c_str());
-  sigset_t empty, defaults; sigemptyset(&empty); sigemptyset(&defaults);
-  for (int signal : {SIGINT,SIGTERM,SIGHUP,SIGCHLD,SIGPIPE}) sigaddset(&defaults, signal);
-  if (!error) error = posix_spawnattr_setsigmask(&spawn.attributes, &empty);
-  if (!error) error = posix_spawnattr_setsigdefault(&spawn.attributes, &defaults);
-  if (!error) error = posix_spawnattr_setflags(&spawn.attributes, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSID);
-  if (error) throw std::runtime_error(std::strerror(error));
-  std::unordered_map<std::string, std::string> values;
-  const auto insert = [&](const std::string& entry) {
-    const auto separator = entry.find('=');
-    if (separator == std::string::npos || separator == 0) throw std::runtime_error("invalid launch environment");
-    values[entry.substr(0, separator)] = entry.substr(separator + 1);
-  };
-  if (environment.empty()) for (char** entry = environ; *entry; ++entry) insert(*entry);
-  else for (const auto& entry : environment) insert(entry);
-  values["WAYLAND_SOCKET"] = "3";
-  for (const char* name : {"WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"})
-    if (const auto* value = std::getenv(name)) values[name] = value;
-  environment.clear();
-  for (const auto& [name, value] : values) environment.push_back(name + "=" + value);
-  std::vector<char*> argv{const_cast<char*>("zterm")}, env;
-  for (auto& argument : arguments) argv.push_back(argument.data());
-  argv.push_back(nullptr);
-  for (auto& entry : environment) env.push_back(entry.data());
-  env.push_back(nullptr);
-  pid_t child = -1;
-  error = posix_spawn(&child, "/proc/self/exe", &spawn.files, &spawn.attributes, argv.data(), env.data());
-  if (error) throw std::runtime_error(std::strerror(error));
-  return child;
+  for (size_t i = 0; i < arguments.size(); ++i) {
+    if (arguments[i] == "-e" || arguments[i] == "--") break;
+    if (arguments[i] == "--config" && i + 1 < arguments.size()) {
+      auto& path = arguments[++i];
+      if (std::filesystem::path(path).is_relative()) path = (std::filesystem::path(directory) / path).string();
+    } else if (arguments[i].starts_with("--config=")) {
+      const auto path = std::filesystem::path(arguments[i].substr(9));
+      if (path.is_relative()) arguments[i] = "--config=" + (std::filesystem::path(directory) / path).string();
+    }
+  }
+  arguments.insert(arguments.begin(), "zterm");
+  auto argv = std::make_shared<std::vector<std::string>>(std::move(arguments));
+  auto settings = options(*argv);
+  if (settings.action != Options::Action::Run) throw std::runtime_error("daemon activation requires terminal window options");
+  auto window = runtime.spare && runtime.spare->healthy() ? std::move(runtime.spare) : prepare_session(settings);
+  window->open(std::move(settings), [argv] { return options(*argv); }, directory, std::move(environment));
+  window->prepare_frame();
+  const auto id = runtime.next_id++;
+  runtime.windows.push_back({id,std::move(window)});
+  return id;
 }
 
-void request(Peer& peer, ClientConnection& broker, const zwayland::wire::Message& message) {
-  pid_t child = 0; std::string error;
+void request(Peer& peer, Runtime& runtime, const zwayland::wire::Message& message) {
+  std::uint32_t window = 0; std::string error;
   try {
     if (message.object_id != 1 || message.opcode != 0 || !message.fds.empty()) throw std::runtime_error("invalid zterm daemon request");
-    Parser parser(message.body, message.fds); child = launch(broker, parser);
+    Parser parser(message.body, message.fds); window = launch(runtime, parser);
   } catch (const std::exception& exception) { error = exception.what(); }
   for (const auto fd : message.fds) close(fd);
   peer.channel.consume(message.size, message.fds.size());
   zwayland::wire::MessageBuilder reply(1); reply.set_opcode(0);
-  reply.append_uint(child); reply.append_string(error);
-  peer.channel.queue(reply.finish(), reply.take_fds()); peer.done = true;
+  reply.append_uint(window); reply.append_string(error);
+  peer.channel.queue(reply.finish(), reply.take_fds()); peer.done = true; (void)peer.channel.flush();
 }
 
 }  // namespace
@@ -131,6 +133,8 @@ int run_daemon() {
   Fd signals(signalfd(-1, &mask, SFD_CLOEXEC | SFD_NONBLOCK));
   if (signals.get() < 0) throw std::runtime_error("cannot initialize daemon signal descriptor");
   ClientConnection broker(true);
+  Runtime runtime;
+  runtime.warm();
   std::list<Peer> peers;
   bool ready = false;
   std::string error;
@@ -144,9 +148,25 @@ int run_daemon() {
     }
   });
   if (!broker.display().roundtrip() || !ready) throw std::runtime_error(error.empty() ? "daemon registration failed" : error);
-  std::fputs("zterm: daemon registered with zwwm as 'zterm'\n", stderr);
+  std::fputs("zterm: terminal engine, GPU and fonts ready; daemon registered as 'zterm'\n", stderr);
   bool running = true;
+  bool prewarm_failed = false;
   while (running) {
+    for (auto& window : runtime.windows) {
+      try { window.session->prepare_frame(); }
+      catch (const std::exception& error) { std::fprintf(stderr,"zterm: window failed: %s\n",error.what()); window.session->retire(); }
+    }
+    if (runtime.spare) {
+      try { runtime.spare->prepare_frame(); }
+      catch (const std::exception& error) { std::fprintf(stderr,"zterm: idle renderer failed: %s\n",error.what()); runtime.spare.reset(); }
+      if (runtime.spare && !runtime.spare->healthy()) runtime.spare.reset();
+    }
+    runtime.recycle();
+    if (runtime.spare) prewarm_failed = false;
+    if (!runtime.spare && !prewarm_failed && std::any_of(runtime.windows.begin(),runtime.windows.end(),[](const auto& window) { return window.session->presented(); })) {
+      try { runtime.warm(); }
+      catch (const std::exception& error) { std::fprintf(stderr,"zterm: renderer prewarm failed: %s\n",error.what()); prewarm_failed = true; }
+    }
     if (!broker.display().flush()) break;
     for (auto& peer : peers) (void)peer.channel.flush();
     std::erase_if(peers, [](const auto& peer) {
@@ -156,23 +176,45 @@ int run_daemon() {
       {broker.display().fd(), static_cast<short>(POLLIN | (broker.display().wants_write() ? POLLOUT : 0)), 0},
       {signals.get(), POLLIN, 0}};
     for (const auto& peer : peers) descriptors.push_back({peer.channel.fd(), static_cast<short>(POLLIN | (peer.channel.has_output() ? POLLOUT : 0)), 0});
-    const int result = poll(descriptors.data(), descriptors.size(), peers.empty() ? -1 : 1000);
+    const auto peer_end = descriptors.size();
+    struct Range { Session* session; size_t start, count; };
+    std::vector<Range> ranges;
+    int timeout = peers.empty() ? -1 : 1000;
+    const auto append = [&](Session& session) {
+      const auto start = descriptors.size(); session.descriptors(descriptors);
+      ranges.push_back({&session,start,descriptors.size()-start});
+      const int next = session.timeout();
+      if (next >= 0) timeout = timeout < 0 ? next : std::min(timeout,next);
+    };
+    for (auto& window : runtime.windows) append(*window.session);
+    if (runtime.spare) append(*runtime.spare);
+    const int result = poll(descriptors.data(), descriptors.size(), timeout);
     if (result < 0) { if (errno == EINTR) continue; throw std::runtime_error("daemon poll failed"); }
     if (descriptors[0].revents & (POLLHUP | POLLERR | POLLNVAL)) break;
     if (descriptors[0].revents & POLLIN) if (!broker.display().dispatch_pending()) break;
     if (descriptors[1].revents & POLLIN) {
       signalfd_siginfo event{};
       while (read(signals.get(), &event, sizeof(event)) == sizeof(event)) {
-        if (event.ssi_signo == SIGCHLD) { while (waitpid(-1, nullptr, WNOHANG) > 0) {} }
+        if (event.ssi_signo == SIGCHLD) {
+          for (pid_t child; (child = waitpid(-1,nullptr,WNOHANG)) > 0;) {
+            for (auto& window : runtime.windows) window.session->reap(child);
+            if (runtime.spare) runtime.spare->reap(child);
+          }
+        }
         else running = false;
       }
     }
+    for (const auto& range : ranges) {
+      try { range.session->dispatch(std::span<const pollfd>(descriptors).subspan(range.start,range.count)); }
+      catch (const std::exception& error) { std::fprintf(stderr,"zterm: session input failed: %s\n",error.what()); range.session->retire(); }
+    }
     for (auto& peer : peers) {
-      const auto found = std::find_if(descriptors.begin() + 2, descriptors.end(), [&](const auto& descriptor) { return descriptor.fd == peer.channel.fd(); });
-      if (found == descriptors.end() || !found->revents) continue;
+      const auto end = descriptors.begin() + peer_end;
+      const auto found = std::find_if(descriptors.begin() + 2, end, [&](const auto& descriptor) { return descriptor.fd == peer.channel.fd(); });
+      if (found == end || !found->revents) continue;
       if (found->revents & (POLLIN | POLLHUP | POLLERR)) {
         (void)peer.channel.read_available();
-        if (!peer.done) if (const auto message = peer.channel.next_message()) request(peer, broker, *message);
+        if (!peer.done) if (const auto message = peer.channel.next_message()) request(peer, runtime, *message);
         if (peer.channel.peer_closed()) peer.done = true;
       }
       if (found->revents & POLLOUT) (void)peer.channel.flush();

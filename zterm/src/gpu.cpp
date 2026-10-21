@@ -231,10 +231,36 @@ void Gpu::set_font_size(unsigned size) {
 }
 
 void Gpu::resize(unsigned width, unsigned height, unsigned font_size) {
+  make_current();
   set_font_size(font_size);
   if (width == width_ && height == height_) return;
   width_ = width; height_ = height;
   for (auto& buffer : buffers_) buffer->retired = true;
+}
+
+void Gpu::make_current() {
+  if (!eglMakeCurrent(egl_, EGL_NO_SURFACE, EGL_NO_SURFACE, context_))
+    throw std::runtime_error("cannot activate terminal GPU context");
+}
+
+void Gpu::warm(zwayland::client::Proxy& dmabuf) {
+  make_current();
+  for (const auto style : {0,1,2,3}) for (char character = 33; character < 127; ++character)
+    (void)glyph(std::string(1, character), style & 1, style & 2, 0xffffff);
+  for (const auto role : {FontRole::Symbols, FontRole::Emoji}) {
+    if ((role == FontRole::Symbols ? fonts_.symbols : fonts_.emoji).empty()) continue;
+    std::string text; Text::append_utf8(text, role == FontRole::Symbols ? U'\ue0a0' : U'😀');
+    (void)glyph(text, false, false, 0xffffff, false, false, role);
+  }
+  if (width_ && height_ && buffers_.empty())
+    for (unsigned count = 0; count < 3; ++count) buffers_.push_back(create_buffer(dmabuf));
+  glFlush();
+}
+
+void Gpu::detach() {
+  if (context_ == EGL_NO_CONTEXT) return;
+  make_current();
+  cached_revision_ = 0;
 }
 
 void Gpu::configure(FontFamilies fonts, unsigned weight, float rounding, float icon_scale,
@@ -430,6 +456,7 @@ void Gpu::build_text(Terminal& terminal) {
 }
 
 bool Gpu::draw(Terminal& terminal, zwayland::client::Proxy& surface, zwayland::client::Proxy& dmabuf, bool cursor) {
+  make_current();
   std::erase_if(buffers_, [](const auto& buffer) { return buffer->retired && !buffer->busy; });
   Buffer* target = nullptr;
   unsigned current = 0;
