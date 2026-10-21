@@ -238,6 +238,13 @@ void Gpu::resize(unsigned width, unsigned height, unsigned font_size) {
   for (auto& buffer : buffers_) buffer->retired = true;
 }
 
+void Gpu::set_padding(unsigned horizontal, unsigned vertical) {
+  horizontal = std::min(horizontal,width_ > cell_width_ ? (width_ - cell_width_) / 2 : 0);
+  vertical = std::min(vertical,height_ > cell_height_ ? (height_ - cell_height_) / 2 : 0);
+  if (horizontal == padding_x_ && vertical == padding_y_) return;
+  padding_x_ = horizontal; padding_y_ = vertical; cached_revision_ = 0;
+}
+
 void Gpu::make_current() {
   if (!eglMakeCurrent(egl_, EGL_NO_SURFACE, EGL_NO_SURFACE, context_))
     throw std::runtime_error("cannot activate terminal GPU context");
@@ -477,10 +484,12 @@ bool Gpu::draw(Terminal& terminal, zwayland::client::Proxy& surface, zwayland::c
     }
     cached_revision_ = terminal.revision();
   }
-  glBindFramebuffer(GL_FRAMEBUFFER, target->framebuffer); glViewport(0, 0, width_, height_);
+  glBindFramebuffer(GL_FRAMEBUFFER, target->framebuffer); glDisable(GL_SCISSOR_TEST);
   glClearColor(background_.red / 255.f * background_opacity_,background_.green / 255.f * background_opacity_,
                background_.blue / 255.f * background_opacity_,background_opacity_); glClear(GL_COLOR_BUFFER_BIT);
-  glUseProgram(program_); glUniform2f(glGetUniformLocation(program_, "viewport"), width_, height_);
+  glViewport(padding_x_,padding_y_,content_width(),content_height());
+  glEnable(GL_SCISSOR_TEST); glScissor(padding_x_,padding_y_,content_width(),content_height());
+  glUseProgram(program_); glUniform2f(glGetUniformLocation(program_, "viewport"), content_width(), content_height());
   glUniform1f(glGetUniformLocation(program_, "text_rounding"), text_rounding_);
   glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_ARRAY, atlas_);
   glUniform1i(glGetUniformLocation(program_, "atlas"), 0);
@@ -515,6 +524,7 @@ bool Gpu::draw(Terminal& terminal, zwayland::client::Proxy& surface, zwayland::c
     batch({cursor_instance}, false, true, cursor_instances_);
   }
   glFlush();
+  glDisable(GL_SCISSOR_TEST);
   p::wl_surface_attach(display_, surface.id, target->proxy, 0, 0);
   p::wl_surface_damage_buffer(display_, surface.id, 0, 0, width_, height_);
   target->busy = true;

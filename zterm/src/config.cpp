@@ -147,6 +147,9 @@ class Decoder {
     else if (name == "window") object(value, name, [this](const auto& key, const auto& item) {
       if (key == "width") options_.width = integer(item, "window.width", 1, 8192);
       else if (key == "height") options_.height = integer(item, "window.height", 1, 8192);
+      else if (key == "padding") options_.padding_x = options_.padding_y = integer(item, "window.padding", 0, 512);
+      else if (key == "padding-x") options_.padding_x = integer(item, "window.padding-x", 0, 512);
+      else if (key == "padding-y") options_.padding_y = integer(item, "window.padding-y", 0, 512);
       else throw std::runtime_error("unknown window setting: " + key);
     });
     else if (name == "cursor") object(value, name, [this](const auto& key, const auto& item) {
@@ -235,6 +238,17 @@ Options load_options(int argc, char** argv) {
     if (argument == "--config" || argument.starts_with("--config=")) { config = value("--config"); no_config = false; if (config->empty()) throw std::runtime_error("--config requires a path"); }
     else if (argument == "--no-config") { no_config = true; config.reset(); }
     else if (argument == "--standalone") set(&Options::standalone, true);
+    else if (argument == "--padding" || argument.starts_with("--padding=") ||
+             argument == "--padding-x" || argument.starts_with("--padding-x=") ||
+             argument == "--padding-y" || argument.starts_with("--padding-y=")) {
+      const auto name = argument.substr(0,argument.find('='));
+      const auto text = value(name); unsigned padding = 0;
+      const auto [end,error] = std::from_chars(text.data(),text.data()+text.size(),padding);
+      if (error != std::errc{} || end != text.data()+text.size() || padding > 512)
+        throw std::runtime_error("padding must be an integer in 0..512");
+      if (name != "--padding-y") set(&Options::padding_x,padding);
+      if (name != "--padding-x") set(&Options::padding_y,padding);
+    }
     else if (argument == "--cursor" || argument.starts_with("--cursor=")) {
       const auto shape = cursor_shape(value("--cursor"));
       overrides.emplace_back([shape](Options& target) { target.cursor.shape = shape; });
@@ -293,6 +307,7 @@ void print_help() {
              "      [--font-bold-italic FAMILY] [--font-symbols FAMILY] [--font-emoji FAMILY]\n"
             "      [--text-rounding 0..1] [--icon-scale 0.5..3] [--cursor beam|line|block]\n"
              "      [--background-opacity 0..1] [--cursor-blink|--no-cursor-blink]\n"
+             "      [--padding PIXELS] [--padding-x PIXELS] [--padding-y PIXELS]\n"
              "      [--shell PROGRAM] [-e COMMAND [ARGS...]]\n"
             "Config: $ZTERM_CONFIG or $XDG_CONFIG_HOME/zterm/config.zw; command-line flags override it.\n"
             "Ctrl+Shift+R: reload; Ctrl+Shift+C/V: copy/paste; drag or double/triple-click: select.\n"

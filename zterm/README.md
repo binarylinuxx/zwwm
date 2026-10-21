@@ -55,12 +55,15 @@ colors = {
 }
 
 cursor = { shape = "beam" blink = true }
+window = { padding-x = 10 padding-y = 10 }
 ```
 
 Font roles also include `bold`, `italic`, and `bold-italic`. All 16 ANSI colors
 are configurable: `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`,
 `white`, and their `bright-` variants. Colors use `#RRGGBB`; selection also
 accepts `#RRGGBBAA`. Per-mille values use `1000 = 100%`.
+Content padding uses logical pixels; CLI flags are `--padding`, `--padding-x`,
+and `--padding-y` (default 10px on each side).
 
 ## NixOS
 

@@ -19,6 +19,7 @@ struct Options {
   unsigned scroll_lines = 3, touchpad_scroll_per_mille = 1000;
   CursorStyle cursor{};
   unsigned width = 960, height = 600;
+  unsigned padding_x = 10, padding_y = 10;
   Color foreground{220,225,232}, background{16,19,25};
   std::array<float, 4> selection{0.22f,0.48f,0.9f,0.45f};
   std::vector<std::string> command, shell;

@@ -57,4 +57,4 @@ input = {
 }
 scrollback-lines = 10000
 standalone = false
-window = { width = 960 height = 600 }
+window = { width = 960 height = 600 padding-x = 10 padding-y = 10 }

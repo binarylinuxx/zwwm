@@ -210,8 +210,8 @@ class App final : public Session {
     if (fds[5].revents & POLLIN) {
       std::uint64_t count = 0; (void)read(selection_timer_, &count, sizeof(count));
       if (selecting_) {
-        const double outside = pointer_y_ < 0 ? -pointer_y_ : pointer_y_ - height_;
-        terminal_.scroll(pointer_y_ < 0 ? std::clamp(static_cast<int>(outside / 20) + 1,1,8) : -std::clamp(static_cast<int>(outside / 20) + 1,1,8));
+        const double outside = pointer_y_ < content_top() ? content_top() - pointer_y_ : pointer_y_ - content_bottom();
+        terminal_.scroll(pointer_y_ < content_top() ? std::clamp(static_cast<int>(outside / 20) + 1,1,8) : -std::clamp(static_cast<int>(outside / 20) + 1,1,8));
         extend_selection();
       }
     }
@@ -428,11 +428,12 @@ class App final : public Session {
     const unsigned width = (static_cast<unsigned>(width_) * scale_ + 119) / 120;
     const unsigned height = (static_cast<unsigned>(height_) * scale_ + 119) / 120;
     gpu_->resize(width, height, std::max(1U, (options_.size * scale_ + 60) / 120));
+    gpu_->set_padding((options_.padding_x * scale_ + 60) / 120,(options_.padding_y * scale_ + 60) / 120);
     terminal_.set_cell_size(gpu_->cell_width(), gpu_->cell_height());
     if (viewport_) p::wp_viewport_set_destination(*display_, viewport_->id, width_, height_);
     else p::wl_surface_set_buffer_scale(*display_, surface_->id, scale_ / 120);
-    const int rows = std::clamp(height / gpu_->cell_height(), 1U, 512U);
-    const int columns = std::clamp(width / gpu_->cell_width(), 1U, 1024U);
+    const int rows = std::clamp(gpu_->content_height() / gpu_->cell_height(), 1U, 512U);
+    const int columns = std::clamp(gpu_->content_width() / gpu_->cell_width(), 1U, 1024U);
     if (!grid_initialized_) {
       pending_rows_ = rows; pending_columns_ = columns; apply_grid_resize();
     } else if (rows != terminal_.rows() || columns != terminal_.columns()) {
@@ -705,8 +706,8 @@ class App final : public Session {
 
   Position pointer_cell() const {
     if (!gpu_) return {};
-    return {std::clamp(static_cast<int>(std::floor(pointer_y_ * scale_ / 120.0 / gpu_->cell_height())), 0, terminal_.rows() - 1),
-            std::clamp(static_cast<int>(std::floor(pointer_x_ * scale_ / 120.0 / gpu_->cell_width())), 0, terminal_.columns() - 1)};
+    return {std::clamp(static_cast<int>(std::floor((pointer_y_ * scale_ / 120.0 - gpu_->padding_y()) / gpu_->cell_height())), 0, terminal_.rows() - 1),
+            std::clamp(static_cast<int>(std::floor((pointer_x_ * scale_ / 120.0 - gpu_->padding_x()) / gpu_->cell_width())), 0, terminal_.columns() - 1)};
   }
 
   void extend_selection() {
@@ -715,13 +716,17 @@ class App final : public Session {
 
   MousePosition mouse_position() const {
     const auto cell = pointer_cell();
-    return {cell.row, cell.col, static_cast<int>(pointer_x_ * scale_ / 120.0), static_cast<int>(pointer_y_ * scale_ / 120.0)};
+    return {cell.row, cell.col, static_cast<int>(pointer_x_ * scale_ / 120.0 - gpu_->padding_x()),
+            static_cast<int>(pointer_y_ * scale_ / 120.0 - gpu_->padding_y())};
   }
+
+  double content_top() const { return gpu_ ? gpu_->padding_y() * 120.0 / scale_ : 0; }
+  double content_bottom() const { return gpu_ ? (gpu_->padding_y() + gpu_->content_height()) * 120.0 / scale_ : height_; }
 
   void selection_timer() {
     if (selection_timer_ < 0) return;
     itimerspec timer{};
-    if (selecting_ && (pointer_y_ < 0 || pointer_y_ >= height_)) timer.it_value.tv_nsec = timer.it_interval.tv_nsec = 40000000;
+    if (selecting_ && (pointer_y_ < content_top() || pointer_y_ >= content_bottom())) timer.it_value.tv_nsec = timer.it_interval.tv_nsec = 40000000;
     (void)timerfd_settime(selection_timer_, 0, &timer, nullptr);
   }
 
@@ -767,8 +772,8 @@ class App final : public Session {
       if (gpu_ && !selecting_ && (!(current_modifiers() & ModShift) || std::any_of(reported_buttons_.begin(), reported_buttons_.end(), [](bool pressed) { return pressed; })))
         (void)terminal_.mouse_motion(mouse_position(), current_modifiers());
       if (selecting_ && gpu_) {
-        if (pointer_y_ < 0) terminal_.scroll(1);
-        else if (pointer_y_ >= height_) terminal_.scroll(-1);
+        if (pointer_y_ < content_top()) terminal_.scroll(1);
+        else if (pointer_y_ >= content_bottom()) terminal_.scroll(-1);
         extend_selection();
         selection_timer();
       }

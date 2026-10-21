@@ -27,6 +27,7 @@ class Gpu {
   void initialize(dev_t device, const std::vector<Format>& formats, FontFamilies fonts, unsigned size,
                   unsigned weight = 400, float text_rounding = 0.5f, float icon_scale = 1.3f);
   void resize(unsigned width, unsigned height, unsigned font_size);
+  void set_padding(unsigned horizontal, unsigned vertical);
   void configure(FontFamilies fonts, unsigned weight, float rounding, float icon_scale,
                  Color background, std::array<float, 4> selection, float background_opacity);
   void make_current();
@@ -36,6 +37,10 @@ class Gpu {
             zwayland::client::Proxy& dmabuf, bool cursor);
   unsigned cell_width() const { return cell_width_; }
   unsigned cell_height() const { return cell_height_; }
+  unsigned padding_x() const { return padding_x_; }
+  unsigned padding_y() const { return padding_y_; }
+  unsigned content_width() const { return width_ - 2 * padding_x_; }
+  unsigned content_height() const { return height_ - 2 * padding_y_; }
   std::function<void()> released;
 
  private:
@@ -64,6 +69,7 @@ class Gpu {
   Color background_{16,19,25};
   std::array<float, 4> selection_color_{0.22f,0.48f,0.9f,0.45f};
   unsigned width_ = 0, height_ = 0;
+  unsigned padding_x_ = 0, padding_y_ = 0;
   std::uint32_t format_ = 0;
   std::vector<std::uint64_t> modifiers_;
   std::vector<std::unique_ptr<Buffer>> buffers_;
